@@ -13,6 +13,16 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 
 ## Registro cronológico
 
+### 2026-07-20 — Aislamiento completo del n8n integrado
+
+- GitHub Actions reveló que un servicio bajo `profiles` sigue interpolando variables requeridas durante `docker compose config`; por eso el target normal exigía `N8N_ENCRYPTION_KEY` aunque n8n no estuviera activo.
+- Se movieron servicio, volumen, variables y secreto API de n8n a `docker-compose.n8n.yml`.
+- `scripts/compose.sh` solo añade ese archivo con `ENABLE_BUNDLED_N8N=true`; el valor normal es `false` y no requiere secretos n8n.
+- El preflight valida los secretos únicamente al habilitarlo. `init-env` tampoco los genera ni añade en el modo normal.
+- Se añadieron siete pruebas operativas: local/Keycloak sin secretos n8n, ausencia normal del servicio, fallo seguro sin secretos, configuración opcional válida, cero puertos n8n y publicación exclusiva del gateway privado.
+- `pnpm install --frozen-lockfile`, `pnpm db:generate`, `pnpm verify` y las 2 pruebas pytest volvieron a pasar localmente. Las siete pruebas Docker se descubren correctamente pero se omiten aquí porque esta estación no tiene Docker; Actions ejecuta las siete y las combinaciones Compose literales.
+- No se añadieron secretos reales, ficticios estáticos ni valores predeterminados para n8n. Las pruebas generan material efímero en cada proceso.
+
 ### 2026-07-20 — Autenticación local ligera para el despliegue privado
 
 #### Causa y decisión
@@ -218,7 +228,7 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 - Eliminado el nombre Compose rígido; `COMPOSE_PROJECT_NAME` aísla dev y producción.
 - Target privado limitado a un gateway en `127.0.0.1:${APP_LOCAL_PORT}`; ningún otro servicio publica puertos.
 - Separadas redes `edge` y `backend`; PostgreSQL/Redis permanecen sin exposición.
-- n8n incluido movido al perfil `bundled-n8n`; el workflow y la integración externa se conservan.
+- n8n incluido se aisló posteriormente en `docker-compose.n8n.yml`; el workflow y la integración externa se conservan.
 - Añadidos healthchecks funcionales para gateway, web, API, AI-CFO, PostgreSQL, Redis, Firefly, Keycloak y n8n opcional.
 - Añadida rotación de logs Docker a tres archivos de 10 MB. No se impusieron capacidades/read-only a imágenes de terceros sin prueba integrada.
 - Sustituidos secretos fallback por interpolación obligatoria y generación criptográfica idempotente.

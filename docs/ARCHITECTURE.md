@@ -19,7 +19,7 @@ Firefly es la fuente canónica de movimientos reales. PostgreSQL es la fuente ca
 
 ## Topologías de despliegue
 
-`docker-compose.yml` no publica puertos y define el núcleo sin proveedor de identidad pesado. `docker-compose.private.yml` añade un gateway HTTP enlazado exclusivamente a `127.0.0.1`, pensado para TLS terminado por Tailscale. `docker-compose.public.yml` añade Caddy con 80/443. `docker-compose.keycloak.yml` se combina únicamente con `AUTH_MODE=keycloak`. El n8n incluido pertenece al perfil `bundled-n8n` y no arranca por defecto.
+`docker-compose.yml` no publica puertos y define el núcleo sin proveedores opcionales. `docker-compose.private.yml` añade un gateway HTTP enlazado exclusivamente a `127.0.0.1`, pensado para TLS terminado por Tailscale. `docker-compose.public.yml` añade Caddy con 80/443. `docker-compose.keycloak.yml` se combina únicamente con `AUTH_MODE=keycloak`. `docker-compose.n8n.yml` contiene servicio, secretos y volumen exclusivos de n8n y solo se combina con `ENABLE_BUNDLED_N8N=true`; el Compose base no los interpola.
 
 ```mermaid
 flowchart LR

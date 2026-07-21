@@ -91,7 +91,15 @@ Un despliegue público tradicional con Keycloak requiere selección explícita:
 DEPLOY_TARGET=public AUTH_MODE=keycloak PUBLIC_AUTH_MODE=keycloak scripts/deploy.sh
 ```
 
-El n8n incluido solo existe para instalaciones independientes y requiere el perfil `bundled-n8n`; el entorno privado previsto usa el n8n externo del servidor.
+El n8n incluido vive en `docker-compose.n8n.yml` y no forma parte del modelo normal. Solo se añade con `ENABLE_BUNDLED_N8N=true`, que también hace obligatorios sus dos secretos. El entorno privado habitual mantiene `false`.
+
+```bash
+# Normal: sin n8n, sin variables ni descarga de su imagen
+ENABLE_BUNDLED_N8N=false scripts/compose.sh config
+
+# Opcional: requiere N8N_AUTOMATION_TOKEN y N8N_ENCRYPTION_KEY en el entorno seguro
+ENABLE_BUNDLED_N8N=true scripts/compose.sh up -d n8n
+```
 
 El stack fija Firefly `6.6.3`; Keycloak `26.6.3` y n8n `2.29.11` solo se usan de forma explícita. Antes de cualquier actualización se debe crear un backup y repetir las pruebas de aceptación.
 

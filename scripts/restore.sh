@@ -22,6 +22,7 @@ backup_format=$(metadata_value BACKUP_FORMAT)
 backup_project=$(metadata_value COMPOSE_PROJECT_NAME)
 backup_target=$(metadata_value DEPLOY_TARGET)
 backup_auth=$(metadata_value AUTH_MODE)
+backup_bundled_n8n=$(metadata_value ENABLE_BUNDLED_N8N)
 backup_commit=$(metadata_value GIT_COMMIT)
 if [ "$backup_format" != "2" ]; then
   echo "Formato de backup incompatible" >&2
@@ -43,7 +44,10 @@ DEPLOY_TARGET=$backup_target
 export DEPLOY_TARGET
 AUTH_MODE=${backup_auth:-local}
 export AUTH_MODE
-scripts/compose.sh --profile bundled-n8n stop gateway api web ai-cfo firefly n8n redis || true
+ENABLE_BUNDLED_N8N=${backup_bundled_n8n:-false}
+export ENABLE_BUNDLED_N8N
+scripts/compose.sh stop gateway api web ai-cfo firefly redis || true
+if [ "$ENABLE_BUNDLED_N8N" = "true" ]; then scripts/compose.sh stop n8n || true; fi
 if [ "$AUTH_MODE" = "keycloak" ]; then scripts/compose.sh stop keycloak || true; fi
 scripts/compose.sh up -d --wait postgres
 gzip -dc "$backup_dir/postgres.sql.gz" | scripts/compose.sh exec -T postgres psql -v ON_ERROR_STOP=1 -U finanzas -d postgres

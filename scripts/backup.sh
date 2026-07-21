@@ -10,23 +10,28 @@ node scripts/preflight.mjs
 project_name=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' .env | tail -n 1)
 deploy_target=${DEPLOY_TARGET:-$(sed -n 's/^DEPLOY_TARGET=//p' .env | tail -n 1)}
 auth_mode=${AUTH_MODE:-$(sed -n 's/^AUTH_MODE=//p' .env | tail -n 1)}
+enable_bundled_n8n=${ENABLE_BUNDLED_N8N:-$(sed -n 's/^ENABLE_BUNDLED_N8N=//p' .env | tail -n 1)}
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 backup_dir="$project_dir/backups/$timestamp"
 mkdir -p "$backup_dir/runtime" "$backup_dir/compose"
 chmod 700 "$backup_dir"
 
-bundled_n8n_running=$(scripts/compose.sh --profile bundled-n8n ps --status running --services n8n 2>/dev/null || true)
+bundled_n8n_running=""
+if [ "${enable_bundled_n8n:-false}" = "true" ]; then
+  bundled_n8n_running=$(scripts/compose.sh ps --status running --services n8n 2>/dev/null || true)
+fi
 restart_apps() {
   scripts/compose.sh up -d firefly api web gateway >/dev/null 2>&1 || true
   if [ "${auth_mode:-local}" = "keycloak" ]; then scripts/compose.sh up -d keycloak >/dev/null 2>&1 || true; fi
   if [ "$bundled_n8n_running" = "n8n" ]; then
-    scripts/compose.sh --profile bundled-n8n up -d n8n >/dev/null 2>&1 || true
+    scripts/compose.sh up -d n8n >/dev/null 2>&1 || true
   fi
 }
 trap restart_apps EXIT INT TERM
 
 # Pausa escritores para que bases y volúmenes correspondan al mismo punto operativo.
-scripts/compose.sh --profile bundled-n8n stop api firefly n8n
+scripts/compose.sh stop api firefly
+if [ "${enable_bundled_n8n:-false}" = "true" ]; then scripts/compose.sh stop n8n; fi
 if [ "${auth_mode:-local}" = "keycloak" ]; then scripts/compose.sh stop keycloak; fi
 
 scripts/compose.sh exec -T postgres \
@@ -62,6 +67,7 @@ scripts/compose.sh images > "$backup_dir/images.txt"
   echo "COMPOSE_PROJECT_NAME=$project_name"
   echo "DEPLOY_TARGET=$deploy_target"
   echo "AUTH_MODE=${auth_mode:-local}"
+  echo "ENABLE_BUNDLED_N8N=${enable_bundled_n8n:-false}"
   echo "BACKUP_FORMAT=2"
 } > "$backup_dir/metadata.env"
 

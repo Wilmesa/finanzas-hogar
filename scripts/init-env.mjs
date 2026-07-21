@@ -7,6 +7,7 @@ import {
   isValidVapidPrivateKey,
   isValidVapidPublicKey,
   parseEnv,
+  BUNDLED_N8N_SECRET_KEYS,
   SECRET_KEYS,
 } from "./lib/config.mjs";
 
@@ -21,6 +22,9 @@ const exampleValues = parseEnv(example);
 const secret = (bytes = 32) => randomBytes(bytes).toString("base64url");
 const generated = [];
 const added = [];
+const bundledN8nEnabled =
+  (currentValues.ENABLE_BUNDLED_N8N ?? exampleValues.ENABLE_BUNDLED_N8N) ===
+  "true";
 
 function generatedSecret(key) {
   if (key === "FIREFLY_APP_KEY")
@@ -52,8 +56,12 @@ if (
 
 for (const [key, exampleValue] of Object.entries(exampleValues)) {
   if (key === "VAPID_PUBLIC_KEY" || key === "VAPID_PRIVATE_KEY") continue;
+  if (BUNDLED_N8N_SECRET_KEYS.includes(key) && !bundledN8nEnabled) continue;
   const existing = currentValues[key];
-  if (SECRET_KEYS.includes(key) && (!existing || isUnsafeSecret(existing))) {
+  if (
+    [...SECRET_KEYS, ...BUNDLED_N8N_SECRET_KEYS].includes(key) &&
+    (!existing || isUnsafeSecret(existing))
+  ) {
     const value = generatedSecret(key);
     replaceValue(key, value);
     generated.push(key);

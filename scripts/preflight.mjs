@@ -9,6 +9,7 @@ import {
   SECRET_KEYS,
   isValidVapidPrivateKey,
   isValidVapidPublicKey,
+  BUNDLED_N8N_SECRET_KEYS,
 } from "./lib/config.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -49,6 +50,15 @@ if (localMode) {
     process.env.AUTH_MODE ||
     env.AUTH_MODE ||
     (target === "public" ? "keycloak" : "local");
+  const bundledN8n =
+    (process.env.ENABLE_BUNDLED_N8N || env.ENABLE_BUNDLED_N8N || "false") ===
+    "true";
+  if (
+    !["true", "false"].includes(
+      process.env.ENABLE_BUNDLED_N8N || env.ENABLE_BUNDLED_N8N || "false",
+    )
+  )
+    errors.push("ENABLE_BUNDLED_N8N debe ser true o false");
   if (!["local", "keycloak"].includes(auth))
     errors.push("AUTH_MODE debe ser local o keycloak");
   if ((process.env.PUBLIC_AUTH_MODE || env.PUBLIC_AUTH_MODE || auth) !== auth)
@@ -73,8 +83,14 @@ if (localMode) {
 
   for (const key of SECRET_KEYS) {
     if (key === "KEYCLOAK_ADMIN_PASSWORD" && auth !== "keycloak") continue;
-    const value = env[key] ?? "";
+    const value = process.env[key] ?? env[key] ?? "";
     if (isUnsafeSecret(value)) errors.push(`${key} no es un secreto válido`);
+  }
+  if (bundledN8n) {
+    for (const key of BUNDLED_N8N_SECRET_KEYS) {
+      const value = process.env[key] ?? env[key] ?? "";
+      if (isUnsafeSecret(value)) errors.push(`${key} no es un secreto válido`);
+    }
   }
   if (!isValidVapidPublicKey(env.VAPID_PUBLIC_KEY))
     errors.push("VAPID_PUBLIC_KEY no es una clave pública VAPID válida");
@@ -142,6 +158,10 @@ if (localMode) {
             errors.push("AUTH_MODE=local no debe incluir Keycloak");
           if (auth === "keycloak" && !services.keycloak)
             errors.push("AUTH_MODE=keycloak debe incluir Keycloak");
+          if (bundledN8n !== Boolean(services.n8n))
+            errors.push(
+              "La presencia de n8n no coincide con ENABLE_BUNDLED_N8N",
+            );
           if (target === "private") {
             const gatewayPorts = services.gateway?.ports ?? [];
             if (
@@ -158,8 +178,6 @@ if (localMode) {
                 errors.push(`${name} publica puertos en el target privado`);
             }
           }
-          if (services.n8n && !services.n8n.profiles?.includes("bundled-n8n"))
-            errors.push("n8n debe permanecer bajo el perfil bundled-n8n");
         } catch (cause) {
           errors.push(`No se pudo analizar docker compose config: ${cause}`);
         }

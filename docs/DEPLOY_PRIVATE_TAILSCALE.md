@@ -193,7 +193,7 @@ No cargue movimientos reales hasta completar privacidad, backup y restauración.
 
 ## 12. n8n externo
 
-El servidor usa su n8n existente. No ejecute el perfil `bundled-n8n`. Más adelante:
+El servidor usa su n8n existente. Mantenga `ENABLE_BUNDLED_N8N=false`. Más adelante:
 
 1. Web Push ya se procesa cada 30 segundos dentro de la API; n8n no es obligatorio.
 2. Si desea un disparador redundante, importe `infra/n8n/daily-reminder.workflow.json` en el n8n existente y configure la URL de API mediante el origen Tailscale y `/api`.
@@ -203,7 +203,13 @@ El servidor usa su n8n existente. No ejecute el perfil `bundled-n8n`. Más adela
 
 Cada miembro instala la PWA, abre **Más → Recordatorios**, agrega los horarios que necesite y acepta el permiso del sistema. Las preferencias se guardan en su zona horaria y cada navegador genera una suscripción independiente. En iPhone/iPad, Web Push requiere añadir primero la PWA a la pantalla de inicio; la solicitud de permiso debe hacerse desde el botón de la aplicación.
 
-La variante incluida permanece disponible solo con el perfil explícito `bundled-n8n` para instalaciones independientes.
+La variante incluida permanece disponible solo para instalaciones independientes. Defina secretos fuertes fuera de Git y actívela explícitamente:
+
+```bash
+ENABLE_BUNDLED_N8N=true scripts/compose.sh up -d n8n
+```
+
+Ese indicador añade `docker-compose.n8n.yml`; sin él, Docker Compose no lee las variables, servicio o volumen de n8n.
 
 ## 13. Logs y diagnóstico
 

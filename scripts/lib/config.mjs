@@ -5,9 +5,12 @@ export const SECRET_KEYS = [
   "KEYCLOAK_ADMIN_PASSWORD",
   "FIREFLY_APP_KEY",
   "AI_CFO_INTERNAL_TOKEN",
+  "VAPID_PRIVATE_KEY",
+];
+
+export const BUNDLED_N8N_SECRET_KEYS = [
   "N8N_AUTOMATION_TOKEN",
   "N8N_ENCRYPTION_KEY",
-  "VAPID_PRIVATE_KEY",
 ];
 
 export function isValidVapidPublicKey(value) {

@@ -80,4 +80,4 @@ Use primero un entorno aislado. No habilite escrituras hasta verificar balances 
 
 ## Compatibilidad
 
-Firefly sigue siendo el libro contable y PostgreSQL la fuente de bolsillos/planes y usuarios locales. La migración no cambia privacidad ni cálculos. La sesión Redis puede expirar durante una restauración; basta iniciar sesión de nuevo. Keycloak y n8n permanecen opcionales.
+Firefly sigue siendo el libro contable y PostgreSQL la fuente de bolsillos/planes y usuarios locales. La migración no cambia privacidad ni cálculos. La sesión Redis puede expirar durante una restauración; basta iniciar sesión de nuevo. Keycloak permanece en su override. n8n está aislado en `docker-compose.n8n.yml`: mantenga `ENABLE_BUNDLED_N8N=false` al migrar salvo que desee restaurar explícitamente ese servicio y sus secretos.
