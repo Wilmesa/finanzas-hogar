@@ -32,10 +32,18 @@ jobs:
           node scripts/configure-domain.mjs
           node scripts/preflight.mjs --bootstrap
           DEPLOY_TARGET=private scripts/compose.sh config --quiet
-          DEPLOY_TARGET=public scripts/compose.sh config --quiet
+          DEPLOY_TARGET=public AUTH_MODE=keycloak PUBLIC_AUTH_MODE=keycloak node scripts/configure-domain.mjs
+          DEPLOY_TARGET=public AUTH_MODE=keycloak PUBLIC_AUTH_MODE=keycloak scripts/compose.sh config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.private.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.public.yml config --quiet
+          N8N_AUTOMATION_TOKEN="$(openssl rand -hex 24)" \
+            N8N_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+            docker compose -f docker-compose.yml -f docker-compose.private.yml -f docker-compose.n8n.yml config --quiet
           test -z "$(git status --porcelain)"
       - name: Construir imágenes propias
         run: DEPLOY_TARGET=private scripts/compose.sh build web api ai-cfo
+      - name: Arranque real y autenticación local
+        run: scripts/smoke-local-auth.sh
 
   ai-cfo:
     runs-on: ubuntu-latest

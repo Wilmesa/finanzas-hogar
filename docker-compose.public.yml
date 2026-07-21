@@ -10,13 +10,12 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}
     volumes:
       - ./infra/caddy/Caddyfile.public:/etc/caddy/Caddyfile:ro
-      - ./infra/caddy/routes.caddy:/etc/caddy/routes.caddy:ro
+      - ./infra/caddy/routes.local.caddy:/etc/caddy/routes.caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       web: { condition: service_healthy }
       api: { condition: service_healthy }
-      keycloak: { condition: service_healthy }
     networks: [edge]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/healthz || exit 1"]

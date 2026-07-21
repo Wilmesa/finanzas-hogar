@@ -25,6 +25,11 @@ import { PlanningService } from "./planning.service.js";
 import { PrismaService } from "./prisma.service.js";
 import { TransactionsService } from "./transactions.service.js";
 import { RemindersService } from "./reminders.service.js";
+import { AuthController } from "./auth.controller.js";
+import { AuthenticationService } from "./auth.js";
+import { LocalAuthService } from "./local-auth.service.js";
+import { RedisService } from "./redis.service.js";
+import { SessionStore } from "./session-store.js";
 
 @Module({
   controllers: [
@@ -42,6 +47,7 @@ import { RemindersService } from "./reminders.service.js";
     AutomationController,
     RemindersController,
     PushController,
+    AuthController,
   ],
   providers: [
     PrismaService,
@@ -52,6 +58,10 @@ import { RemindersService } from "./reminders.service.js";
     NewsService,
     PlanningService,
     RemindersService,
+    RedisService,
+    SessionStore,
+    LocalAuthService,
+    AuthenticationService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

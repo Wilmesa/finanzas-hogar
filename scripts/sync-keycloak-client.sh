@@ -4,6 +4,12 @@ set -eu
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 
+auth_mode=${AUTH_MODE:-$(sed -n 's/^AUTH_MODE=//p' .env | tail -n 1)}
+if [ "${auth_mode:-local}" != "keycloak" ]; then
+  echo "AUTH_MODE=local: sincronización de Keycloak omitida."
+  exit 0
+fi
+
 scripts/compose.sh exec -T keycloak /bin/bash -ec '
   config=/tmp/kcadm-finanzas.config
   trap "rm -f $config" EXIT

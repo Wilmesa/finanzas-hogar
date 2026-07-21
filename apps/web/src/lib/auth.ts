@@ -2,6 +2,18 @@ import { browser } from "$app/environment";
 import { env } from "$env/dynamic/public";
 
 const encoder = new TextEncoder();
+let localCsrfToken: string | null = null;
+
+export interface AuthenticatedUser {
+  id: string;
+  email: string;
+  householdMemberId: string;
+  displayName: string;
+  roles: string[];
+  authProvider: "local" | "keycloak" | "development";
+  csrfToken?: string;
+  sessionExpiresAt?: number;
+}
 
 function base64Url(bytes: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)))
@@ -20,11 +32,20 @@ export function isServerMode(): boolean {
   return env.PUBLIC_DATA_MODE === "server";
 }
 
+export function authMode(): "local" | "keycloak" {
+  return env.PUBLIC_AUTH_MODE === "keycloak" ? "keycloak" : "local";
+}
+
+function apiBase(): string {
+  return env.PUBLIC_API_BASE_URL ?? "/api";
+}
+
 function keycloakBase(): string {
   return `${env.PUBLIC_KEYCLOAK_URL ?? "/auth"}/realms/${env.PUBLIC_KEYCLOAK_REALM ?? "finanzas"}`;
 }
 
 export async function login(): Promise<void> {
+  if (authMode() === "local") return;
   const verifier = randomValue();
   const state = randomValue();
   const challenge = base64Url(
@@ -42,6 +63,22 @@ export async function login(): Promise<void> {
     code_challenge_method: "S256",
   });
   location.assign(`${keycloakBase()}/protocol/openid-connect/auth?${query}`);
+}
+
+export async function loginLocal(
+  identifier: string,
+  password: string,
+): Promise<AuthenticatedUser> {
+  const response = await fetch(`${apiBase()}/v1/auth/login`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ identifier, password }),
+  });
+  if (!response.ok) throw await responseError(response);
+  const user = (await response.json()) as AuthenticatedUser;
+  localCsrfToken = user.csrfToken ?? null;
+  return user;
 }
 
 export async function completeLogin(url: URL): Promise<void> {
@@ -110,7 +147,7 @@ async function refreshAccessToken(): Promise<string | null> {
 }
 
 export async function getAccessToken(): Promise<string | null> {
-  if (!browser || !isServerMode()) return null;
+  if (!browser || !isServerMode() || authMode() === "local") return null;
   const token = sessionStorage.getItem("access_token");
   const expiresAt = Number(
     sessionStorage.getItem("access_token_expires_at") ?? 0,
@@ -119,11 +156,71 @@ export async function getAccessToken(): Promise<string | null> {
   return refreshAccessToken();
 }
 
-export async function isAuthenticated(): Promise<boolean> {
-  return !isServerMode() || Boolean(await getAccessToken());
+export function getCsrfToken(): string | null {
+  return authMode() === "local" ? localCsrfToken : null;
 }
 
-export function logout(): void {
-  sessionStorage.clear();
+export async function currentLocalUser(): Promise<AuthenticatedUser | null> {
+  const response = await fetch(`${apiBase()}/v1/auth/me`, {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  });
+  if (response.status === 401) {
+    localCsrfToken = null;
+    return null;
+  }
+  if (!response.ok) throw await responseError(response);
+  const user = (await response.json()) as AuthenticatedUser;
+  localCsrfToken = user.csrfToken ?? null;
+  return user;
+}
+
+export async function isAuthenticated(): Promise<boolean> {
+  if (!isServerMode()) return true;
+  if (authMode() === "local") return Boolean(await currentLocalUser());
+  return Boolean(await getAccessToken());
+}
+
+export async function changeLocalPassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const response = await fetch(`${apiBase()}/v1/auth/change-password`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(localCsrfToken ? { "X-CSRF-Token": localCsrfToken } : {}),
+    },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  if (!response.ok) throw await responseError(response);
+  localCsrfToken = null;
+}
+
+export async function logout(): Promise<void> {
+  if (authMode() === "local") {
+    await fetch(`${apiBase()}/v1/auth/logout`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: localCsrfToken ? { "X-CSRF-Token": localCsrfToken } : {},
+    });
+    localCsrfToken = null;
+  } else {
+    sessionStorage.removeItem("access_token");
+    sessionStorage.removeItem("refresh_token");
+    sessionStorage.removeItem("access_token_expires_at");
+  }
   location.assign("/");
+}
+
+async function responseError(response: Response): Promise<Error> {
+  const payload = (await response.json().catch(() => null)) as {
+    message?: string | string[];
+  } | null;
+  const message = Array.isArray(payload?.message)
+    ? payload.message.join(". ")
+    : payload?.message;
+  return new Error(message ?? `Error HTTP ${response.status}`);
 }

@@ -6,12 +6,52 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 
 - **Producto:** beta experimental funcional, lista para pruebas personales controladas.
 - **Modo de prueba local:** PWA con almacenamiento persistente del navegador, sin requerir Firefly ni PostgreSQL.
-- **Modo servidor:** API, PostgreSQL, Firefly, Keycloak, AI-CFO y n8n mediante Docker Compose.
+- **Modo servidor privado:** API, PostgreSQL, Redis, Firefly, AI-CFO, web y gateway; autenticación local ligera. Keycloak y n8n son opcionales y no arrancan por defecto.
 - **Datos reales:** no deben cargarse hasta completar la lista “Antes de producción”.
 - **Zona horaria base:** `America/Bogota`.
 - **Moneda base:** COP; USD y EUR admitidas sin mezclarse automáticamente.
 
 ## Registro cronológico
+
+### 2026-07-20 — Aislamiento completo del n8n integrado
+
+- GitHub Actions reveló que un servicio bajo `profiles` sigue interpolando variables requeridas durante `docker compose config`; por eso el target normal exigía `N8N_ENCRYPTION_KEY` aunque n8n no estuviera activo.
+- Se movieron servicio, volumen, variables y secreto API de n8n a `docker-compose.n8n.yml`.
+- `scripts/compose.sh` solo añade ese archivo con `ENABLE_BUNDLED_N8N=true`; el valor normal es `false` y no requiere secretos n8n.
+- El preflight valida los secretos únicamente al habilitarlo. `init-env` tampoco los genera ni añade en el modo normal.
+- Se añadieron siete pruebas operativas: local/Keycloak sin secretos n8n, ausencia normal del servicio, fallo seguro sin secretos, configuración opcional válida, cero puertos n8n y publicación exclusiva del gateway privado.
+- `pnpm install --frozen-lockfile`, `pnpm db:generate`, `pnpm verify` y las 2 pruebas pytest volvieron a pasar localmente. Las siete pruebas Docker se descubren correctamente pero se omiten aquí porque esta estación no tiene Docker; Actions ejecuta las siete y las combinaciones Compose literales.
+- No se añadieron secretos reales, ficticios estáticos ni valores predeterminados para n8n. Las pruebas generan material efímero en cada proceso.
+
+### 2026-07-20 — Autenticación local ligera para el despliegue privado
+
+#### Causa y decisión
+
+- La imagen API no incluía `class-validator`/`class-transformer` aunque `ValidationPipe` los requiere en runtime. Se añadieron como dependencias de producción sin retirar `transform=true`.
+- Keycloak imponía un servicio desproporcionado para dos usuarios en una red privada. Se conservó como override explícito y se estableció `AUTH_MODE=local` para el target privado.
+
+#### Implementado
+
+- `LocalUser` uno a uno con `Member` y migración Prisma aditiva, sin modificar datos financieros.
+- Hash scrypt (`N=65536`, `r=8`, `p=1`) con salt aleatorio; sesiones opacas y rate limit en el Redis existente.
+- Cookie `HttpOnly`, `Secure`, `SameSite=Strict`; token CSRF en memoria, renovación, logout y revocación global por versión de contraseña.
+- Login PWA por correo/usuario, consulta `/me`, cierre y cambio de contraseña. No se almacenan credenciales locales en Web Storage.
+- Bootstrap idempotente y oculto para dos usuarios mediante `scripts/bootstrap-local-users.sh`.
+- Compose local sin Keycloak/n8n; `docker-compose.keycloak.yml` conserva OIDC/PKCE opcional.
+- Backup/restore incluyen la tabla local porque ya respaldan PostgreSQL; actualizar imágenes no elimina usuarios.
+
+#### Verificado en esta estación
+
+- Instalación bloqueada, `pnpm db:generate` y `pnpm verify`: correctos; TypeScript/Svelte sin errores, 12 pruebas de dominio y 15 pruebas API aprobadas, builds de PWA/API correctos y formato limpio.
+- `python3 -m pytest services/ai-cfo/tests -q`: 2 pruebas aprobadas.
+- Pruebas locales de hash, credenciales correctas/incorrectas, usuario ausente/deshabilitado, expiración, rate limit, cambio, revocación, cookie y aislamiento: correctas.
+- Las pruebas Compose y el smoke real quedaron preparados para CI, pero se omiten localmente porque Docker no está instalado. No se afirma ahorro de memoria: no pudo medirse de forma comparable.
+
+#### Pendiente de cierre
+
+- Confirmar Compose, builds y smoke Docker mediante GitHub Actions.
+- Confirmar visualmente login/cambio de contraseña en la PWA instalada.
+- No se ha desplegado ni modificado el servidor personal.
 
 ### 2026-07-20 — Prisma Client reproducible en instalaciones limpias
 
@@ -188,7 +228,7 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 - Eliminado el nombre Compose rígido; `COMPOSE_PROJECT_NAME` aísla dev y producción.
 - Target privado limitado a un gateway en `127.0.0.1:${APP_LOCAL_PORT}`; ningún otro servicio publica puertos.
 - Separadas redes `edge` y `backend`; PostgreSQL/Redis permanecen sin exposición.
-- n8n incluido movido al perfil `bundled-n8n`; el workflow y la integración externa se conservan.
+- n8n incluido se aisló posteriormente en `docker-compose.n8n.yml`; el workflow y la integración externa se conservan.
 - Añadidos healthchecks funcionales para gateway, web, API, AI-CFO, PostgreSQL, Redis, Firefly, Keycloak y n8n opcional.
 - Añadida rotación de logs Docker a tres archivos de 10 MB. No se impusieron capacidades/read-only a imágenes de terceros sin prueba integrada.
 - Sustituidos secretos fallback por interpolación obligatoria y generación criptográfica idempotente.
@@ -245,7 +285,7 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 
 ### 1. PWA
 
-La PWA es la única interfaz que usan los miembros. En modo local guarda un conjunto de prueba en el navegador. En modo servidor llama a `/api/v1` y autentica contra Keycloak. Nunca debe recibir PAT de Firefly, claves de IA o acceso a PostgreSQL.
+La PWA es la única interfaz que usan los miembros. En modo de datos local guarda un conjunto de prueba en el navegador. En modo servidor llama a `/api/v1` y usa cookie local segura o Keycloak según `PUBLIC_AUTH_MODE`. Nunca debe recibir PAT de Firefly, claves de IA o acceso a PostgreSQL.
 
 ### 2. API/BFF
 
@@ -277,8 +317,7 @@ La API compara cada minuto aproximado con los horarios individuales, evita dupli
 - [ ] Ejecutar el preflight sin errores.
 - [ ] Sustituir todos los secretos de ejemplo.
 - [ ] Configurar dominio, DNS y TLS.
-- [ ] Crear los dos usuarios reales en Keycloak y activar MFA.
-- [ ] Configurar atributos `household_id` y `household_role` en Keycloak.
+- [ ] Ejecutar `scripts/bootstrap-local-users.sh` y probar ambos usuarios locales.
 - [ ] Crear contextos/tokens Firefly compartido y privados.
 - [ ] Ejecutar migraciones y seed inicial.
 - [ ] Probar alta, gasto, aporte, privacidad y conciliación con Firefly real.
@@ -300,7 +339,7 @@ Esta lista debe reducirse antes de declarar versión estable:
 - Worker BullMQ y dead-letter queue.
 - RLS forzado con rol PostgreSQL de runtime separado.
 - Observabilidad Prometheus/Grafana/Loki conectada al código.
-- Suite E2E con Firefly y Keycloak reales.
+- Suite E2E con Firefly real; Keycloak solo necesita regresión si se habilita el modo opcional.
 - Verificación en red real de BanRep/Alpha Vantage y alertas de fallo del proveedor.
 - Outbox/saga para compensar escrituras parciales entre el libro compartido y uno privado.
 - Conciliación de ingresos esperados contra depósitos Firefly y aplicación idempotente de las asignaciones acordadas.

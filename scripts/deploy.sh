@@ -19,17 +19,25 @@ scripts/compose.sh build --pull web api ai-cfo
 
 echo "Iniciando datos, identidad, contabilidad e IA..."
 scripts/compose.sh up -d --wait --wait-timeout "${HEALTHCHECK_TIMEOUT:-300}" \
-  postgres redis ai-cfo keycloak firefly
+  postgres redis ai-cfo firefly
 
 echo "Aplicando migraciones Prisma antes de iniciar la API..."
 scripts/compose.sh run --rm --no-deps api \
   pnpm --filter @finanzas/api exec prisma migrate deploy
 
-scripts/sync-keycloak-client.sh
+auth_mode=${AUTH_MODE:-$(sed -n 's/^AUTH_MODE=//p' .env | tail -n 1)}
+enable_bundled_n8n=${ENABLE_BUNDLED_N8N:-$(sed -n 's/^ENABLE_BUNDLED_N8N=//p' .env | tail -n 1)}
+if [ "${auth_mode:-local}" = "keycloak" ]; then
+  scripts/compose.sh up -d --wait --wait-timeout "${HEALTHCHECK_TIMEOUT:-300}" keycloak
+  scripts/sync-keycloak-client.sh
+fi
 
 echo "Iniciando API, PWA y gateway del target ${DEPLOY_TARGET:-configurado en .env}..."
 scripts/compose.sh up -d --wait --wait-timeout "${HEALTHCHECK_TIMEOUT:-300}" \
   api web gateway
+if [ "${enable_bundled_n8n:-false}" = "true" ]; then
+  scripts/compose.sh up -d --wait --wait-timeout "${HEALTHCHECK_TIMEOUT:-300}" n8n
+fi
 scripts/compose.sh ps
 
-echo "n8n integrado no fue iniciado. Diagnóstico: scripts/compose.sh logs --tail=100 gateway api web keycloak firefly ai-cfo"
+echo "Diagnóstico: scripts/compose.sh logs --tail=100 gateway api web firefly ai-cfo"
