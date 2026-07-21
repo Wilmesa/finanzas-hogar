@@ -32,13 +32,14 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 
 #### Verificado en esta estación
 
-- `pnpm check`: correcto, sin reducir TypeScript estricto.
+- Instalación bloqueada, `pnpm db:generate` y `pnpm verify`: correctos; TypeScript/Svelte sin errores, 12 pruebas de dominio y 15 pruebas API aprobadas, builds de PWA/API correctos y formato limpio.
+- `python3 -m pytest services/ai-cfo/tests -q`: 2 pruebas aprobadas.
 - Pruebas locales de hash, credenciales correctas/incorrectas, usuario ausente/deshabilitado, expiración, rate limit, cambio, revocación, cookie y aislamiento: correctas.
 - Las pruebas Compose y el smoke real quedaron preparados para CI, pero se omiten localmente porque Docker no está instalado. No se afirma ahorro de memoria: no pudo medirse de forma comparable.
 
 #### Pendiente de cierre
 
-- Ejecutar `pnpm verify`, pytest y el smoke Docker en GitHub Actions.
+- Confirmar Compose, builds y smoke Docker mediante GitHub Actions.
 - Confirmar visualmente login/cambio de contraseña en la PWA instalada.
 - No se ha desplegado ni modificado el servidor personal.
 
