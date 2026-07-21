@@ -2,11 +2,13 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -27,6 +29,7 @@ import { PrismaService } from "./prisma.service.js";
 import { NewsService } from "./news.service.js";
 import { FireflyClient } from "./firefly.client.js";
 import { PlanningService } from "./planning.service.js";
+import { RemindersService } from "./reminders.service.js";
 import {
   TransactionsService,
   type CreateTransactionInput,
@@ -437,16 +440,7 @@ export class NewsController {
 
 @Controller("v1/automation/reminders")
 export class AutomationController {
-  constructor(private readonly prisma: PrismaService) {}
-
-  private bogotaDate(): string {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Bogota",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
-  }
+  constructor(private readonly reminders: RemindersService) {}
 
   private verify(token?: string) {
     if (
@@ -457,72 +451,53 @@ export class AutomationController {
     }
   }
 
-  @Get("eligible")
-  async eligible(
-    @Headers("x-automation-token") token: string | undefined,
-    @Query("date") date?: string,
-  ) {
+  @Post("process")
+  process(@Headers("x-automation-token") token: string | undefined) {
     this.verify(token);
-    const dateValue = date ?? this.bogotaDate();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
-      throw new BadRequestException("date must use YYYY-MM-DD");
-    }
-    const localDate = new Date(`${dateValue}T00:00:00Z`);
-    const members = await this.prisma.member.findMany({
-      where: { checkIns: { none: { localDate } } },
-      select: { id: true, displayName: true, householdId: true },
-    });
-    return {
-      eligible: members.map((member) => ({
-        ...member,
-        message: "¿Registraste tus movimientos de hoy?",
-      })),
-    };
+    return this.reminders.processDue();
+  }
+}
+
+@Controller("v1/reminders")
+export class RemindersController {
+  constructor(private readonly reminders: RemindersService) {}
+
+  @Get("preferences")
+  preferences(@CurrentActor() actor: Actor) {
+    return this.reminders.preference(actor);
   }
 
-  @Post("send")
-  async send(
-    @Headers("x-automation-token") token: string | undefined,
-    @Body() body: { memberId: string; channel: string },
+  @Put("preferences")
+  updatePreferences(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.reminders.updatePreference(body, actor);
+  }
+}
+
+@Controller("v1/push")
+export class PushController {
+  constructor(private readonly reminders: RemindersService) {}
+
+  @Get("public-key")
+  publicKey() {
+    return this.reminders.publicKey();
+  }
+
+  @Post("subscriptions")
+  subscribe(
+    @Body() body: unknown,
+    @Headers("user-agent") userAgent: string | undefined,
+    @CurrentActor() actor: Actor,
   ) {
-    this.verify(token);
-    if (body.channel === "telegram") {
-      const botToken = process.env.TELEGRAM_BOT_TOKEN;
-      const chatId =
-        body.memberId === (process.env.MEMBER_A_ID ?? "member-a")
-          ? process.env.TELEGRAM_CHAT_ID_MEMBER_A
-          : body.memberId === (process.env.MEMBER_B_ID ?? "member-b")
-            ? process.env.TELEGRAM_CHAT_ID_MEMBER_B
-            : undefined;
-      if (!botToken || !chatId) {
-        return { accepted: false, reason: "telegram_not_configured" };
-      }
-      const response = await fetch(
-        `https://api.telegram.org/bot${botToken}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: "¿Registraste tus movimientos de hoy? Abre Nuestro Dinero o marca que hoy no tuviste movimientos.",
-            disable_notification: false,
-          }),
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
-      return {
-        accepted: response.ok,
-        memberId: body.memberId,
-        channel: "telegram",
-        privateContentIncluded: false,
-      };
-    }
-    return {
-      accepted: false,
-      memberId: body.memberId,
-      channel: "web_push",
-      reason: "web_push_subscription_missing",
-      privateContentIncluded: false,
-    };
+    return this.reminders.subscribe(body, actor, userAgent);
+  }
+
+  @Delete("subscriptions")
+  unsubscribe(
+    @Body() body: { endpoint?: string },
+    @CurrentActor() actor: Actor,
+  ) {
+    if (!body.endpoint)
+      throw new BadRequestException("endpoint es obligatorio");
+    return this.reminders.unsubscribe(body.endpoint, actor);
   }
 }

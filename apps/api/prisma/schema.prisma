@@ -59,6 +59,9 @@ model Household {
   incomeSources IncomeSource[]
   expectedIncomes ExpectedIncome[]
   financialPlans FinancialPlan[]
+  reminderPreferences ReminderPreference[]
+  pushSubscriptions PushSubscription[]
+  reminderDeliveries ReminderDelivery[]
 }
 
 model Member {
@@ -77,9 +80,60 @@ model Member {
   financialPlans FinancialPlan[] @relation("FinancialPlanOwner")
   planRevisions PlanRevision[] @relation("PlanRevisionActor")
   planAuditEvents PlanAuditEvent[] @relation("PlanAuditActor")
+  reminderPreference ReminderPreference?
+  pushSubscriptions PushSubscription[]
+  reminderDeliveries ReminderDelivery[]
 
   @@unique([householdId, email])
   @@index([householdId])
+}
+
+model ReminderPreference {
+  id          String   @id @default(uuid())
+  householdId String
+  memberId    String   @unique
+  enabled     Boolean  @default(false)
+  timezone    String   @default("America/Bogota")
+  times       Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  member      Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, enabled])
+}
+
+model PushSubscription {
+  id          String   @id @default(uuid())
+  householdId String
+  memberId    String
+  endpoint    String   @unique
+  p256dh      String
+  auth        String
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  member      Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, memberId])
+}
+
+model ReminderDelivery {
+  id            String   @id @default(uuid())
+  householdId   String
+  memberId      String
+  localDate     DateTime @db.Date
+  scheduledTime String
+  status        String
+  errorCode     String?
+  createdAt     DateTime @default(now())
+  sentAt        DateTime?
+  household     Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  member        Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, localDate, scheduledTime])
+  @@index([householdId, localDate, status])
 }
 
 model Pocket {
