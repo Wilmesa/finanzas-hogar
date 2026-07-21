@@ -51,6 +51,7 @@ model Household {
   timezone     String        @default("America/Bogota")
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+  onboardingCompletedAt DateTime?
   members      Member[]
   pockets      Pocket[]
   transactions TransactionAttribution[]
@@ -87,6 +88,8 @@ model Member {
   displayName String
   email       String
   role        String       @default("member")
+  avatar      String?
+  color       String       @default("#059669")
   createdAt   DateTime     @default(now())
   household   Household    @relation(fields: [householdId], references: [id], onDelete: Cascade)
   pockets     Pocket[]     @relation("PocketOwner")
@@ -219,7 +222,7 @@ model IncomeAllocationRule {
 model TransactionAttribution {
   id                    String      @id @default(uuid())
   householdId           String
-  fireflyTransactionId  String
+  fireflyTransactionId  String?
   ledgerScope           LedgerScope
   pocketId              String?
   payerMemberId         String
@@ -229,6 +232,9 @@ model TransactionAttribution {
   currency              String
   occurredAt            DateTime
   idempotencyKey        String
+  syncStatus            String      @default("pending")
+  syncError             String?
+  lastSyncAttemptAt     DateTime?
   createdAt             DateTime    @default(now())
   household             Household   @relation(fields: [householdId], references: [id], onDelete: Cascade)
   pocket                Pocket?     @relation(fields: [pocketId], references: [id])
@@ -236,7 +242,7 @@ model TransactionAttribution {
   expectedIncome         ExpectedIncome?
 
   @@unique([householdId, idempotencyKey])
-  @@unique([ledgerScope, fireflyTransactionId])
+  @@unique([ledgerScope, payerMemberId, fireflyTransactionId])
   @@index([householdId, occurredAt])
   @@index([pocketId, occurredAt])
 }

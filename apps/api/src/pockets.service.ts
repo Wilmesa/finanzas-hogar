@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -6,6 +7,7 @@ import {
 import { Prisma } from "@prisma/client";
 import {
   CreatePocketSchema,
+  UpdatePocketSchema,
   canReadPocket,
   projectGoalByContribution,
   projectGoalByDate,
@@ -35,8 +37,23 @@ export class PocketsService {
     return pocket;
   }
 
+  private parseCreate(raw: unknown) {
+    const result = CreatePocketSchema.safeParse(raw);
+    if (!result.success) {
+      throw new BadRequestException({
+        code: "POCKET_VALIDATION_FAILED",
+        message: "Revisa los datos del bolsillo e inténtalo nuevamente",
+        fields: result.error.issues.map((issue) => ({
+          field: issue.path.join("."),
+          message: issue.message,
+        })),
+      });
+    }
+    return result.data;
+  }
+
   create(raw: unknown, actor: Actor) {
-    const input = CreatePocketSchema.parse(raw);
+    const input = this.parseCreate(raw);
     return this.prisma.pocket.create({
       data: {
         householdId: actor.householdId,
@@ -49,6 +66,61 @@ export class PocketsService {
         currentAmount: new Prisma.Decimal(input.currentAmount),
         rolloverPolicy: input.rolloverPolicy,
       },
+    });
+  }
+
+  async update(id: string, raw: unknown, actor: Actor) {
+    const pocket = await this.find(id, actor);
+    if (pocket.ownerMemberId !== actor.memberId && actor.role !== "owner") {
+      throw new NotFoundException();
+    }
+    const result = UpdatePocketSchema.safeParse(raw);
+    if (!result.success) {
+      throw new BadRequestException({
+        code: "POCKET_VALIDATION_FAILED",
+        message: "Revisa los cambios del bolsillo",
+        fields: result.error.issues.map((issue) => ({
+          field: issue.path.join("."),
+          message: issue.message,
+        })),
+      });
+    }
+    const { version, ...input } = result.data;
+    const updated = await this.prisma.pocket.updateMany({
+      where: { id: pocket.id, version },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.purpose !== undefined ? { purpose: input.purpose } : {}),
+        ...(input.visibility !== undefined
+          ? { visibility: input.visibility }
+          : {}),
+        ...(input.currency !== undefined ? { currency: input.currency } : {}),
+        ...(input.policy !== undefined
+          ? { policy: input.policy as Prisma.InputJsonValue }
+          : {}),
+        ...(input.rolloverPolicy !== undefined
+          ? { rolloverPolicy: input.rolloverPolicy }
+          : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        version: { increment: 1 },
+      },
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException(
+        "El bolsillo cambió en otro dispositivo. Actualiza e inténtalo de nuevo",
+      );
+    }
+    return this.find(id, actor);
+  }
+
+  async archive(id: string, actor: Actor) {
+    const pocket = await this.find(id, actor);
+    if (pocket.ownerMemberId !== actor.memberId && actor.role !== "owner") {
+      throw new NotFoundException();
+    }
+    return this.prisma.pocket.update({
+      where: { id: pocket.id },
+      data: { status: "archived", version: { increment: 1 } },
     });
   }
 

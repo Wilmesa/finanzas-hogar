@@ -16,6 +16,7 @@ export APP_ORIGIN=https://smoke.example.invalid APP_LOCAL_PORT=${SMOKE_LOCAL_POR
 export POSTGRES_PASSWORD=test-only-postgres-password-123456
 export FIREFLY_APP_KEY="base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 export AI_CFO_INTERNAL_TOKEN=test-only-ai-cfo-token-123456789
+export AI_PROVIDER=deterministic
 export VAPID_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 export VAPID_PRIVATE_KEY=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
 export DEV_AUTH_ENABLED=false HOUSEHOLD_ID=smoke-household HOUSEHOLD_NAME="Smoke household"
@@ -52,10 +53,22 @@ csrf=$(node -e 'const fs=require("fs"); console.log(JSON.parse(fs.readFileSync(p
 test -n "$cookie" && test -n "$csrf"
 curl -fsS -H "Cookie: $cookie" "$base/api/v1/auth/me" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(x.householdMemberId!=="smoke-member-a")process.exit(1)})'
 curl -fsS -H "Cookie: $cookie" "$base/api/v1/pockets" >/dev/null
+curl -fsS -X POST -H "Cookie: $cookie" -H "X-CSRF-Token: $csrf" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Mercado smoke","purpose":"daily_spend","visibility":"household","currency":"COP","currentAmount":"0","rolloverPolicy":"carry_balance","policy":{"kind":"periodic_spend","limit":"1000000","period":"monthly"}}' \
+  "$base/api/v1/pockets" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(x.name!=="Mercado smoke"||x.policy.kind!=="periodic_spend")process.exit(1)})'
+curl -fsS -X PATCH -H "Cookie: $cookie" -H "X-CSRF-Token: $csrf" \
+  -H 'Content-Type: application/json' -d '{"displayName":"Smoke Owner","color":"#059669"}' \
+  "$base/api/v1/profile" >/dev/null
+curl -fsS -X POST -H "Cookie: $cookie" -H "X-CSRF-Token: $csrf" \
+  -H 'Content-Type: application/json' -d '{"scope":"household"}' \
+  "$base/api/v1/insights/generate" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(!x.id||!x.payload.bundle)process.exit(1)})'
+curl -fsS -H "Cookie: $cookie" "$base/" | grep -q 'FinNest'
+curl -fsS -H "Cookie: $cookie" "$base/manifest.webmanifest" | grep -q 'FinNest'
 curl -fsS -X POST -H "Cookie: $cookie" -H "X-CSRF-Token: $csrf" "$base/api/v1/auth/logout" >/dev/null
 if curl -fsS -H "Cookie: $cookie" "$base/api/v1/auth/me" >/dev/null 2>&1; then
   echo "La sesión revocada siguió siendo aceptada." >&2
   exit 1
 fi
 
-echo "Smoke local correcto: arranque, login, /me, endpoint protegido, logout y revocación."
+echo "Smoke local correcto: arranque, login, perfil, bolsillo periódico, AI-CFO determinístico, PWA, logout y revocación."

@@ -4,11 +4,13 @@ import { AuthGuard } from "./auth.js";
 import { AiCfoClient } from "./ai-cfo.client.js";
 import {
   AllocationController,
+  AiCfoController,
   AccountsController,
   AnalyticsController,
   AutomationController,
   CheckInController,
   HealthController,
+  HouseholdController,
   InsightsController,
   NewsController,
   PlanningController,
@@ -30,16 +32,19 @@ import { AuthenticationService } from "./auth.js";
 import { LocalAuthService } from "./local-auth.service.js";
 import { RedisService } from "./redis.service.js";
 import { SessionStore } from "./session-store.js";
+import { HouseholdService } from "./household.service.js";
 
 @Module({
   controllers: [
     HealthController,
+    HouseholdController,
     PocketsController,
     AccountsController,
     PlanningController,
     ProjectionsController,
     TransactionsController,
     AllocationController,
+    AiCfoController,
     AnalyticsController,
     CheckInController,
     InsightsController,
@@ -62,6 +67,7 @@ import { SessionStore } from "./session-store.js";
     SessionStore,
     LocalAuthService,
     AuthenticationService,
+    HouseholdService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

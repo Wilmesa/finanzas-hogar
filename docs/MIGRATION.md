@@ -68,6 +68,24 @@ DEPLOY_TARGET=private scripts/update-server.sh
 
 La actualización crea backup antes del pull, conserva target y `AUTH_MODE`, aplica migraciones y registra rollback en `runtime/deploy/last-update.env`. Los hashes locales están en PostgreSQL y sobreviven a reconstrucciones de imagen.
 
+### Migración FinNest 202607210002
+
+La migración `202607210002_finnest_profiles` es aditiva: incorpora avatar/color, fecha de onboarding y estado de sincronización. Hace nullable el identificador Firefly únicamente para poder guardar operaciones `pending` antes de la llamada externa y amplía el índice único para contextos privados por miembro. No borra hogares, miembros, cuentas, bolsillos, movimientos ni volúmenes.
+
+Antes de actualizar:
+
+```bash
+scripts/backup.sh
+git status --porcelain
+DEPLOY_TARGET=private scripts/update-server.sh
+```
+
+Después valide login de ambos miembros, nombres reales, libros Firefly, cuenta compartida, bolsillo periódico, gasto, Copiloto y Web Push. No ejecute `docker compose down -v`, no cambie `COMPOSE_PROJECT_NAME` y no renombre volúmenes.
+
+### Rollback
+
+El rollback de código usa el commit registrado en `runtime/deploy/last-update.env`. Como la migración es compatible hacia atrás y solo añade columnas/relaja una columna, se recomienda volver primero a la imagen anterior y conservar las columnas. Restaurar PostgreSQL solo es necesario si una prueba controlada demuestra corrupción; en ese caso use el backup previo en un entorno aislado y siga el procedimiento de restauración completo.
+
 ## Restaurar
 
 La restauración es destructiva y exige confirmación:

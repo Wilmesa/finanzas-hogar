@@ -21,6 +21,7 @@ export interface CreateTransactionInput {
   pocketId?: string;
   occurredAt: string;
   fundingSourceScope?: "household" | "private";
+  payerMemberId?: string;
 }
 
 @Injectable()
@@ -41,6 +42,9 @@ export class TransactionsService {
       },
       orderBy: { occurredAt: "desc" },
       take: 200,
+      include: {
+        payer: { select: { id: true, displayName: true, color: true } },
+      },
     });
   }
 
@@ -80,7 +84,7 @@ export class TransactionsService {
         },
       },
     });
-    if (existing) return existing;
+    if (existing?.syncStatus === "synchronized") return existing;
 
     const pocket = input.pocketId
       ? await this.prisma.pocket.findUnique({ where: { id: input.pocketId } })
@@ -88,6 +92,54 @@ export class TransactionsService {
     if (input.pocketId && (!pocket || !canReadPocket(pocket, actor)))
       throw new NotFoundException();
     const scope = pocket?.visibility === "private" ? "private" : "household";
+    const payerMemberId = input.payerMemberId ?? actor.memberId;
+    if (scope === "private" && payerMemberId !== actor.memberId) {
+      throw new BadRequestException(
+        "Un movimiento privado solo puede registrarse a tu nombre",
+      );
+    }
+    const payer = await this.prisma.member.findFirst({
+      where: { id: payerMemberId, householdId: actor.householdId },
+      select: { id: true, displayName: true },
+    });
+    if (!payer)
+      throw new BadRequestException("El pagador no pertenece al hogar");
+
+    const availableAccounts = await this.firefly.listAssetAccounts(
+      scope,
+      payerMemberId,
+    );
+    const accountIds = new Set(availableAccounts.map((account) => account.id));
+    if (input.sourceId && !accountIds.has(input.sourceId)) {
+      throw new BadRequestException(
+        "La cuenta de origen no pertenece al libro seleccionado",
+      );
+    }
+    if (input.destinationId && !accountIds.has(input.destinationId)) {
+      throw new BadRequestException(
+        "La cuenta de destino no pertenece al libro seleccionado",
+      );
+    }
+
+    const pending =
+      existing ??
+      (await this.prisma.transactionAttribution.create({
+        data: {
+          householdId: actor.householdId,
+          fireflyTransactionId: null,
+          ledgerScope: scope,
+          pocketId: pocket?.id ?? null,
+          payerMemberId,
+          category: input.category ?? null,
+          merchant: input.description,
+          amount: new Prisma.Decimal(input.amount),
+          currency: input.currency.toUpperCase(),
+          occurredAt: new Date(input.occurredAt),
+          idempotencyKey,
+          syncStatus: "pending",
+          lastSyncAttemptAt: new Date(),
+        },
+      }));
 
     const makePayload = (description: string, externalId: string) => ({
       error_if_duplicate_hash: false,
@@ -113,36 +165,60 @@ export class TransactionsService {
       ],
     });
 
-    if (scope === "private" && input.fundingSourceScope === "household") {
-      await this.firefly.createTransaction(
-        makePayload(
-          redactPrivateAllocation(actor.displayName),
-          `${idempotencyKey}:household-redacted`,
-        ),
-        "household",
-        actor.memberId,
-      );
-    }
-    const fireflyResult = await this.firefly.createTransaction(
-      makePayload(input.description, idempotencyKey),
-      scope,
-      actor.memberId,
-    );
+    let fireflyResult: { data: { id: string } };
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const attribution = await tx.transactionAttribution.create({
-          data: {
+      if (scope === "private" && input.fundingSourceScope === "household") {
+        const redactedResult = await this.firefly.createTransaction(
+          makePayload(
+            redactPrivateAllocation(payer.displayName),
+            `${idempotencyKey}:household-redacted`,
+          ),
+          "household",
+          payerMemberId,
+        );
+        await this.prisma.transactionAttribution.upsert({
+          where: {
+            householdId_idempotencyKey: {
+              householdId: actor.householdId,
+              idempotencyKey: `${idempotencyKey}:household-redacted`,
+            },
+          },
+          create: {
             householdId: actor.householdId,
-            fireflyTransactionId: fireflyResult.data.id,
-            ledgerScope: scope,
-            pocketId: pocket?.id ?? null,
-            payerMemberId: actor.memberId,
-            category: input.category ?? null,
-            merchant: input.description,
+            fireflyTransactionId: redactedResult.data.id,
+            ledgerScope: "household",
+            pocketId: null,
+            payerMemberId,
+            category: null,
+            merchant: redactPrivateAllocation(payer.displayName),
             amount: new Prisma.Decimal(input.amount),
             currency: input.currency.toUpperCase(),
             occurredAt: new Date(input.occurredAt),
-            idempotencyKey,
+            idempotencyKey: `${idempotencyKey}:household-redacted`,
+            syncStatus: "synchronized",
+            lastSyncAttemptAt: new Date(),
+          },
+          update: {
+            fireflyTransactionId: redactedResult.data.id,
+            syncStatus: "synchronized",
+            syncError: null,
+            lastSyncAttemptAt: new Date(),
+          },
+        });
+      }
+      fireflyResult = await this.firefly.createTransaction(
+        makePayload(input.description, idempotencyKey),
+        scope,
+        payerMemberId,
+      );
+      return await this.prisma.$transaction(async (tx) => {
+        const attribution = await tx.transactionAttribution.update({
+          where: { id: pending.id },
+          data: {
+            fireflyTransactionId: fireflyResult.data.id,
+            syncStatus: "synchronized",
+            syncError: null,
+            lastSyncAttemptAt: new Date(),
           },
         });
         if (pocket) {
@@ -187,6 +263,14 @@ export class TransactionsService {
       ) {
         throw new ConflictException("Esta operación ya fue procesada");
       }
+      await this.prisma.transactionAttribution.update({
+        where: { id: pending.id },
+        data: {
+          syncStatus: "failed",
+          syncError: "No fue posible sincronizar con el libro contable",
+          lastSyncAttemptAt: new Date(),
+        },
+      });
       throw error;
     }
   }

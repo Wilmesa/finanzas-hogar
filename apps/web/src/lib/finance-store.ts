@@ -8,18 +8,22 @@ import {
 } from "./demo";
 import type {
   AccountView,
+  AccountConnectionView,
+  AiStatusView,
   ExpectedIncomeView,
   FinanceState,
   FundingPlanView,
   IncomeSourceView,
+  InsightView,
+  MemberView,
   PlanRevisionView,
   PocketView,
   TransactionView,
 } from "./types";
 
-const STORAGE_KEY = "nuestro-dinero:v1";
-const initial: FinanceState = {
-  schemaVersion: 2,
+const STORAGE_KEY = "finnest:v3";
+const demoInitial: FinanceState = {
+  schemaVersion: 3,
   pockets: structuredClone(demoPockets),
   transactions: structuredClone(demoTransactions),
   accounts: [
@@ -40,6 +44,34 @@ const initial: FinanceState = {
       scope: "private",
     },
   ],
+  accountConnections: [
+    { scope: "household", configured: true, status: "available" },
+    { scope: "private", configured: true, status: "available" },
+  ],
+  members: [
+    {
+      id: "demo-me",
+      displayName: "Tú",
+      email: "demo@example.invalid",
+      role: "owner",
+      color: "#059669",
+    },
+    {
+      id: "demo-partner",
+      displayName: "Pareja",
+      email: "pareja@example.invalid",
+      role: "member",
+      color: "#2563EB",
+    },
+  ],
+  insights: [],
+  aiStatus: {
+    status: "demo",
+    provider: "deterministic",
+    model: "demo",
+    keyPresent: true,
+    generationEnabled: true,
+  },
   incomeSources: [
     {
       id: "source-salary",
@@ -119,18 +151,54 @@ const initial: FinanceState = {
           decisionNote:
             "Acordamos priorizar vivienda y reservar el remanente para diciembre.",
           createdAt: "2026-07-20T10:00:00.000Z",
-          actorName: "Ana",
+          actorName: "Tú",
         },
       ],
     },
   ],
   settings: {
-    memberName: "Ana",
+    memberName: "Tú",
+    memberId: "demo-me",
+    memberEmail: "demo@example.invalid",
+    memberRole: "owner",
+    memberColor: "#059669",
     householdName: "Nuestro hogar",
     baseCurrency: "COP",
     dailyReminder: "20:00",
   },
 };
+
+const serverInitial: FinanceState = {
+  schemaVersion: 3,
+  pockets: [],
+  transactions: [],
+  accounts: [],
+  accountConnections: [],
+  members: [],
+  insights: [],
+  aiStatus: {
+    status: "unknown",
+    provider: "disabled",
+    model: null,
+    keyPresent: false,
+    generationEnabled: false,
+  },
+  incomeSources: [],
+  expectedIncomes: [],
+  fundingPlans: [],
+  settings: {
+    memberName: "",
+    memberId: "",
+    memberEmail: "",
+    memberRole: "member",
+    memberColor: "#059669",
+    householdName: "",
+    baseCurrency: "COP",
+    dailyReminder: "20:00",
+  },
+};
+
+const initial = browser && isServerMode() ? serverInitial : demoInitial;
 
 function readLocal(): FinanceState {
   if (!browser) return initial;
@@ -143,13 +211,17 @@ function readLocal(): FinanceState {
     > & {
       schemaVersion?: number;
     };
-    if (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2)
-      return initial;
+    if (![1, 2, 3].includes(parsed.schemaVersion ?? 0)) return initial;
     return {
       ...initial,
       ...parsed,
-      schemaVersion: 2,
+      schemaVersion: 3,
       accounts: parsed.accounts ?? initial.accounts,
+      accountConnections:
+        parsed.accountConnections ?? initial.accountConnections,
+      members: parsed.members ?? initial.members,
+      insights: parsed.insights ?? initial.insights,
+      aiStatus: parsed.aiStatus ?? initial.aiStatus,
       incomeSources: parsed.incomeSources ?? initial.incomeSources,
       expectedIncomes: parsed.expectedIncomes ?? initial.expectedIncomes,
       fundingPlans: parsed.fundingPlans ?? initial.fundingPlans,
@@ -175,7 +247,7 @@ function serverPocketToView(item: Record<string, unknown>): PocketView {
   return {
     id: String(item.id),
     name: String(item.name),
-    purpose: String(item.purpose).replaceAll("_", " "),
+    purpose: String(item.purpose),
     visibility: item.visibility === "private" ? "private" : "household",
     currency: String(item.currency),
     currentAmount,
@@ -188,6 +260,8 @@ function serverPocketToView(item: Record<string, unknown>): PocketView {
     policyKind: policy.kind as PocketView["policyKind"],
     targetDate: policy.targetDate,
     monthlyContribution: Number(policy.contributionAmount ?? 0) || undefined,
+    version: Number(item.version ?? 1),
+    status: (item.status as PocketView["status"]) ?? "active",
   };
 }
 
@@ -275,11 +349,25 @@ function serverFundingPlanToView(
 
 export async function hydrateFinanceData(): Promise<void> {
   if (!browser || !isServerMode()) return;
-  const [pockets, transactions, accounts, planning] = await Promise.all([
+  const [
+    pockets,
+    transactions,
+    accountResult,
+    planning,
+    household,
+    insights,
+    aiStatus,
+  ] = await Promise.all([
     apiRequest<Record<string, unknown>[]>("/v1/pockets"),
     apiRequest<Record<string, unknown>[]>("/v1/transactions"),
-    apiRequest<Record<string, unknown>[]>("/v1/accounts"),
+    apiRequest<{
+      accounts: Record<string, unknown>[];
+      connections: AccountConnectionView[];
+    }>("/v1/accounts"),
     apiRequest<Record<string, unknown>>("/v1/planning"),
+    apiRequest<Record<string, unknown>>("/v1/household"),
+    apiRequest<InsightView[]>("/v1/insights"),
+    apiRequest<AiStatusView>("/v1/ai-cfo/status"),
   ]);
   const planningSources = (planning.sources ?? []) as Record<string, unknown>[];
   const planningIncomes = (planning.incomes ?? []) as Record<string, unknown>[];
@@ -287,7 +375,7 @@ export async function hydrateFinanceData(): Promise<void> {
   financeData.update((state) => ({
     ...state,
     pockets: pockets.map(serverPocketToView),
-    accounts: accounts.map((item): AccountView => ({
+    accounts: accountResult.accounts.map((item): AccountView => ({
       id: String(item.id),
       name: String(item.name),
       type: String(item.type),
@@ -295,6 +383,43 @@ export async function hydrateFinanceData(): Promise<void> {
       currentBalance: Number(item.currentBalance),
       scope: item.scope === "private" ? "private" : "household",
     })),
+    accountConnections: accountResult.connections,
+    members: ((household.members ?? []) as Record<string, unknown>[]).map(
+      (member): MemberView => ({
+        id: String(member.id),
+        displayName: String(member.displayName),
+        email: String(member.email),
+        username: member.username ? String(member.username) : null,
+        role: member.role === "owner" ? "owner" : "member",
+        avatar: member.avatar ? String(member.avatar) : null,
+        color: String(member.color ?? "#059669"),
+      }),
+    ),
+    insights,
+    aiStatus,
+    settings: {
+      ...state.settings,
+      memberName:
+        ((household.members ?? []) as Record<string, unknown>[])
+          .find((member) => member.id === household.currentMemberId)
+          ?.displayName?.toString() ?? "",
+      memberId: String(household.currentMemberId),
+      memberEmail:
+        ((household.members ?? []) as Record<string, unknown>[])
+          .find((member) => member.id === household.currentMemberId)
+          ?.email?.toString() ?? "",
+      memberRole: household.currentRole === "owner" ? "owner" : "member",
+      memberAvatar:
+        ((household.members ?? []) as Record<string, unknown>[])
+          .find((member) => member.id === household.currentMemberId)
+          ?.avatar?.toString() ?? null,
+      memberColor:
+        ((household.members ?? []) as Record<string, unknown>[])
+          .find((member) => member.id === household.currentMemberId)
+          ?.color?.toString() ?? "#059669",
+      householdName: String(household.name),
+      baseCurrency: String(household.baseCurrency),
+    },
     incomeSources: planningSources.map(serverIncomeSourceToView),
     expectedIncomes: planningIncomes.map(serverExpectedIncomeToView),
     fundingPlans: planningPlans.map(serverFundingPlanToView),
@@ -307,7 +432,10 @@ export async function hydrateFinanceData(): Promise<void> {
           .find((pocket) => pocket.id === item.pocketId)
           ?.name?.toString() ?? "Sin bolsillo",
       pocketId: String(item.pocketId ?? ""),
-      payer: String(item.payerMemberId ?? "Miembro"),
+      payer: String(
+        (item.payer as Record<string, unknown> | undefined)?.displayName ??
+          "Miembro",
+      ),
       amount: Number(item.amount),
       currency: String(item.currency),
       kind: "expense",
@@ -384,7 +512,7 @@ export async function createTransaction(input: {
   pocketId: string;
   merchant: string;
   category: string;
-  payer: string;
+  payerMemberId: string;
   accountId?: string;
   kind?: TransactionView["kind"];
 }): Promise<void> {
@@ -412,6 +540,7 @@ export async function createTransaction(input: {
         pocketId: pocket.id,
         occurredAt: new Date().toISOString(),
         fundingSourceScope: pocket.visibility,
+        payerMemberId: input.payerMemberId,
         sourceId: kind === "expense" ? account.id : undefined,
         destinationId: kind === "income" ? account.id : undefined,
       }),
@@ -425,7 +554,9 @@ export async function createTransaction(input: {
     category: input.category,
     pocket: pocket.name,
     pocketId: pocket.id,
-    payer: input.payer,
+    payer:
+      state.members.find((member) => member.id === input.payerMemberId)
+        ?.displayName ?? state.settings.memberName,
     amount: input.amount,
     currency: pocket.currency,
     kind,
@@ -471,6 +602,229 @@ export async function allocateToPocket(
         : pocket,
     ),
   }));
+}
+
+export async function setPocketStatus(
+  pocket: PocketView,
+  status: "active" | "paused" | "completed" | "archived",
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      pockets:
+        status === "archived"
+          ? state.pockets.filter((item) => item.id !== pocket.id)
+          : state.pockets.map((item) =>
+              item.id === pocket.id ? { ...item, status } : item,
+            ),
+    }));
+    return;
+  }
+  if (status === "archived") {
+    await apiRequest(`/v1/pockets/${pocket.id}`, { method: "DELETE" });
+  } else {
+    await apiRequest(`/v1/pockets/${pocket.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, version: pocket.version ?? 1 }),
+    });
+  }
+  await hydrateFinanceData();
+}
+
+export async function createAccount(input: {
+  name: string;
+  type: string;
+  currency: string;
+  scope: "household" | "private";
+  openingBalance?: number;
+  openingBalanceDate?: string;
+}): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      accounts: [
+        {
+          id: crypto.randomUUID(),
+          name: input.name,
+          type: input.type,
+          currency: input.currency,
+          currentBalance: input.openingBalance ?? 0,
+          scope: input.scope,
+        },
+        ...state.accounts,
+      ],
+    }));
+    return;
+  }
+  await apiRequest("/v1/accounts", {
+    method: "POST",
+    body: JSON.stringify({
+      ...input,
+      openingBalance:
+        input.openingBalance === undefined
+          ? undefined
+          : String(input.openingBalance),
+    }),
+  });
+  await hydrateFinanceData();
+}
+
+export async function updateAccount(
+  account: AccountView,
+  input: { name?: string; currency?: string },
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      accounts: state.accounts.map((item) =>
+        item.id === account.id ? { ...item, ...input } : item,
+      ),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/accounts/${account.scope}/${account.id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  await hydrateFinanceData();
+}
+
+export async function archiveAccount(account: AccountView): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      accounts: state.accounts.filter((item) => item.id !== account.id),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/accounts/${account.scope}/${account.id}`, {
+    method: "DELETE",
+  });
+  await hydrateFinanceData();
+}
+
+export async function updateProfile(input: {
+  displayName: string;
+  avatar?: string | null;
+  color: string;
+}): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      members: state.members.map((member) =>
+        member.id === state.settings.memberId
+          ? { ...member, ...input }
+          : member,
+      ),
+      settings: {
+        ...state.settings,
+        memberName: input.displayName,
+        memberAvatar: input.avatar,
+        memberColor: input.color,
+      },
+    }));
+    return;
+  }
+  await apiRequest("/v1/profile", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  await hydrateFinanceData();
+}
+
+export async function updateHousehold(input: {
+  name: string;
+  baseCurrency: string;
+}): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      settings: {
+        ...state.settings,
+        householdName: input.name,
+        baseCurrency: input.baseCurrency,
+      },
+    }));
+    return;
+  }
+  await apiRequest("/v1/household", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  await hydrateFinanceData();
+}
+
+export async function generateInsight(
+  scope: "household" | "private",
+): Promise<void> {
+  if (!isServerMode()) {
+    const state = get(financeData);
+    const visiblePocketIds = new Set(
+      state.pockets
+        .filter((pocket) => pocket.visibility === scope)
+        .map((pocket) => pocket.id),
+    );
+    const expenses = state.transactions.filter(
+      (transaction) =>
+        transaction.kind === "expense" &&
+        (scope === "household"
+          ? visiblePocketIds.has(transaction.pocketId)
+          : visiblePocketIds.has(transaction.pocketId)),
+    );
+    const total = expenses.reduce(
+      (sum, transaction) => sum + transaction.amount,
+      0,
+    );
+    const evidence = expenses.slice(0, 5).map((transaction) => ({
+      id: `transaction:${transaction.id}`,
+      kind: "transaction",
+      label: `${transaction.category} · ${transaction.merchant}`,
+      value: String(transaction.amount),
+    }));
+    const now = new Date();
+    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1)
+      .toISOString()
+      .slice(0, 10);
+    const periodEnd = now.toISOString().slice(0, 10);
+    const insight: InsightView = {
+      id: `local-insight-${Date.now()}`,
+      scope,
+      periodStart,
+      periodEnd,
+      createdAt: now.toISOString(),
+      payload: {
+        provider: "deterministic",
+        model: "local-demo",
+        generatedAt: now.toISOString(),
+        title: scope === "household" ? "Lectura del hogar" : "Lectura personal",
+        priority: "low",
+        confidence: expenses.length > 0 ? 1 : null,
+        evidence,
+        bundle: {
+          status: expenses.length > 0 ? "ok" : "insufficient_data",
+          summary:
+            expenses.length > 0
+              ? `Se analizaron ${expenses.length} gastos por un total de ${total.toLocaleString("es-CO")} ${state.settings.baseCurrency}.`
+              : "Todavía no hay gastos suficientes en este alcance para generar un análisis.",
+          alerts: [],
+          spendingFindings: [],
+          opportunities: [],
+          goals: [],
+          news: [],
+        },
+      },
+    };
+    financeData.update((current) => ({
+      ...current,
+      insights: [insight, ...current.insights],
+    }));
+    return;
+  }
+  await apiRequest("/v1/insights/generate", {
+    method: "POST",
+    body: JSON.stringify({ scope }),
+  });
+  await hydrateFinanceData();
 }
 
 function localTimeBucket(
@@ -861,13 +1215,11 @@ export async function importFinanceData(raw: string): Promise<void> {
     schemaVersion?: number;
   };
   if (
-    (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) ||
+    ![1, 2, 3].includes(parsed.schemaVersion ?? 0) ||
     !Array.isArray(parsed.pockets) ||
     !Array.isArray(parsed.transactions)
   ) {
-    throw new Error(
-      "El archivo no pertenece a Nuestro Dinero o usa otra versión",
-    );
+    throw new Error("El archivo no pertenece a FinNest o usa otra versión");
   }
   if (isServerMode()) {
     const pocketIds = new Map<string, string>();
@@ -966,10 +1318,14 @@ export async function importFinanceData(raw: string): Promise<void> {
   financeData.set({
     ...initial,
     ...parsed,
-    schemaVersion: 2,
+    schemaVersion: 3,
     pockets: parsed.pockets,
     transactions: parsed.transactions,
     accounts: parsed.accounts ?? initial.accounts,
+    accountConnections: parsed.accountConnections ?? initial.accountConnections,
+    members: parsed.members ?? initial.members,
+    insights: parsed.insights ?? initial.insights,
+    aiStatus: parsed.aiStatus ?? initial.aiStatus,
     incomeSources: parsed.incomeSources ?? [],
     expectedIncomes: parsed.expectedIncomes ?? [],
     fundingPlans: parsed.fundingPlans ?? [],

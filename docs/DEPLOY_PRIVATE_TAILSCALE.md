@@ -114,6 +114,23 @@ curl -fsS http://127.0.0.1:3100/healthz
 
 La dirección esperada es `127.0.0.1:3100`, nunca `0.0.0.0:3100`.
 
+### Administración temporal de Firefly
+
+FinNest administra cuentas desde su propia interfaz. Solo para crear PAT o diagnosticar Firefly, habilite temporalmente su consola en loopback:
+
+```bash
+scripts/firefly-admin.sh start
+scripts/firefly-admin.sh status
+# al terminar
+scripts/firefly-admin.sh stop
+```
+
+El override publica únicamente `127.0.0.1:${FIREFLY_LOCAL_PORT}`. `stop` recrea el servicio sin el puerto y no borra el volumen. Acceda mediante túnel SSH si trabaja desde otro equipo; nunca cambie el binding a `0.0.0.0`.
+
+### Activar AI-CFO
+
+Mantenga `AI_PROVIDER=disabled` hasta elegir un proveedor. Para OpenAI configure `OPENAI_API_KEY` y `OPENAI_MODEL`; para Gemini, `GEMINI_API_KEY` y `GEMINI_MODEL`; para NVIDIA, Groq, OpenRouter u otro compatible use `AI_PROVIDER=openai_compatible` y las variables `AI_COMPATIBLE_*` documentadas en `.env.example`. Después ejecute `node scripts/preflight.mjs`, recree `ai-cfo` y use **Copiloto → Probar conexión**. La interfaz nunca muestra la clave.
+
 ## 8. Publicar mediante Tailscale Serve
 
 ```bash

@@ -60,7 +60,7 @@
 <section class="pwa-card" aria-labelledby="pwa-title">
   <div>
     <span class="eyebrow">Aplicación instalable</span>
-    <h2 id="pwa-title">Nuestro Dinero en este dispositivo</h2>
+    <h2 id="pwa-title">FinNest en este dispositivo</h2>
     <p>
       {#if installed}
         Está instalada y se abre como una app independiente.

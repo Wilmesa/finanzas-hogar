@@ -34,18 +34,20 @@ Los snapshots de revisión se autorizan siempre a través del plan padre. Nunca 
 
 ## Modelo de amenaza resumido
 
-| Riesgo                             | Control actual                                                   |
-| ---------------------------------- | ---------------------------------------------------------------- |
-| Enumeración de bolsillo privado    | Respuesta 404 y filtros por propietario                          |
-| Duplicación por reintento          | Claves únicas y `external_id` Firefly                            |
-| Fuga por IA                        | Snapshot por alcance, evidencia permitida y validador de salida  |
-| Prompt injection en noticias/notas | Los textos se tratan como datos no confiables                    |
-| Robo de PAT Firefly                | Tokens solo servidor; variables secretas                         |
-| Recordatorios reveladores          | Web Push genérico, sin montos, comercios ni nombres de bolsillos |
-| Puertos internos expuestos         | Compose privado solo enlaza gateway a 127.0.0.1                  |
-| Secretos conocidos                 | Interpolación obligatoria, init criptográfico y preflight        |
-| Fuerza bruta de login local        | Límite Redis por identificador/IP y mensaje genérico             |
-| CSRF con cookie local              | SameSite Strict y token CSRF para toda mutación                  |
+| Riesgo                             | Control actual                                                     |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| Enumeración de bolsillo privado    | Respuesta 404 y filtros por propietario                            |
+| Duplicación por reintento          | Claves únicas y `external_id` Firefly                              |
+| Fuga por IA                        | Snapshot por alcance, evidencia permitida y validador de salida    |
+| Clave de IA expuesta               | Solo `.env`/secreto servidor; UI recibe un booleano de presencia   |
+| Prompt injection en noticias/notas | Los textos se tratan como datos no confiables                      |
+| Robo de PAT Firefly                | Tokens solo servidor; variables secretas                           |
+| Recordatorios reveladores          | Web Push genérico, sin montos, comercios ni nombres de bolsillos   |
+| Puertos internos expuestos         | Compose privado solo enlaza gateway a 127.0.0.1                    |
+| Secretos conocidos                 | Interpolación obligatoria, init criptográfico y preflight          |
+| Fuerza bruta de login local        | Límite Redis por identificador/IP y mensaje genérico               |
+| CSRF con cookie local              | SameSite Strict y token CSRF para toda mutación                    |
+| Escritura Firefly parcial          | Atribución previa `pending`, error sanitizado y reintento trazable |
 
 Los servicios usan dos redes: `edge` para gateway/web/API y `backend` para datos y servicios internos. Keycloak se incorpora a ambas solo en su modo. PostgreSQL y Redis no publican puertos. Los logs Docker rotan a tres archivos de 10 MB.
 

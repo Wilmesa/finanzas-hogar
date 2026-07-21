@@ -97,6 +97,49 @@ if (localMode) {
   if (!isValidVapidPrivateKey(env.VAPID_PRIVATE_KEY))
     errors.push("VAPID_PRIVATE_KEY no es una clave privada VAPID válida");
 
+  const aiProvider = (
+    process.env.AI_PROVIDER ||
+    env.AI_PROVIDER ||
+    "disabled"
+  ).toLowerCase();
+  if (
+    ![
+      "disabled",
+      "openai",
+      "gemini",
+      "openai_compatible",
+      "deterministic",
+    ].includes(aiProvider)
+  ) {
+    errors.push(
+      "AI_PROVIDER debe ser disabled, openai, gemini, openai_compatible o deterministic",
+    );
+  }
+  if (
+    aiProvider === "openai" &&
+    !(process.env.OPENAI_API_KEY || env.OPENAI_API_KEY)
+  ) {
+    errors.push("OPENAI_API_KEY es obligatoria cuando AI_PROVIDER=openai");
+  }
+  if (
+    aiProvider === "gemini" &&
+    !(process.env.GEMINI_API_KEY || env.GEMINI_API_KEY)
+  ) {
+    errors.push("GEMINI_API_KEY es obligatoria cuando AI_PROVIDER=gemini");
+  }
+  if (aiProvider === "openai_compatible") {
+    for (const key of [
+      "AI_COMPATIBLE_BASE_URL",
+      "AI_COMPATIBLE_API_KEY",
+      "AI_COMPATIBLE_MODEL",
+    ]) {
+      if (!(process.env[key] || env[key]))
+        errors.push(
+          `${key} es obligatoria cuando AI_PROVIDER=openai_compatible`,
+        );
+    }
+  }
+
   for (const key of [
     "FIREFLY_HOUSEHOLD_TOKEN",
     "FIREFLY_PRIVATE_TOKEN_MEMBER_A",

@@ -19,7 +19,11 @@ import {
   type AuthenticatedRequest,
 } from "./auth.js";
 import { LocalAuthService } from "./local-auth.service.js";
-import { SESSION_COOKIE, type StoredSession } from "./session-store.js";
+import {
+  SESSION_COOKIE,
+  SessionStore,
+  type StoredSession,
+} from "./session-store.js";
 
 export class LoginDto {
   @IsString()
@@ -66,7 +70,10 @@ function publicUser(actor: Actor, session?: StoredSession) {
 
 @Controller("v1/auth")
 export class AuthController {
-  constructor(private readonly local: LocalAuthService) {}
+  constructor(
+    private readonly local: LocalAuthService,
+    private readonly sessions: SessionStore,
+  ) {}
 
   @Post("login")
   async login(
@@ -155,5 +162,29 @@ export class AuthController {
     );
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return { changed: true, loginRequired: true };
+  }
+
+  @Get("sessions")
+  async sessionsList(@CurrentActor() actor: Actor) {
+    if (authMode() !== "local") return { supported: false, sessions: [] };
+    const sessions = await this.sessions.list(actor.memberId);
+    return {
+      supported: true,
+      sessions: sessions.map((session) => ({
+        issuedAt: session.issuedAt,
+        expiresAt: session.expiresAt,
+      })),
+    };
+  }
+
+  @Post("logout-all")
+  async logoutAll(
+    @CurrentActor() actor: Actor,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    if (authMode() !== "local") throw new NotFoundException();
+    await this.sessions.destroyAll(actor.memberId);
+    reply.clearCookie(SESSION_COOKIE, { path: "/" });
+    return { loggedOut: true };
   }
 }

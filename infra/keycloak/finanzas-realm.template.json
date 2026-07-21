@@ -1,7 +1,7 @@
 {
   "realm": "finanzas",
   "enabled": true,
-  "displayName": "Nuestro Dinero",
+  "displayName": "FinNest",
   "registrationAllowed": false,
   "resetPasswordAllowed": true,
   "rememberMe": true,
