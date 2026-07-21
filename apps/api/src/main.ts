@@ -13,7 +13,10 @@ async function bootstrap() {
     new FastifyAdapter({ logger: true }),
   );
   app.enableCors({
-    origin: process.env.APP_BASE_URL ?? "http://localhost:5173",
+    origin:
+      process.env.APP_ORIGIN ??
+      process.env.APP_BASE_URL ??
+      "http://localhost:5173",
     credentials: true,
   });
   app.useGlobalPipes(new ValidationPipe({ transform: true }));

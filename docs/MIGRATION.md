@@ -1,109 +1,83 @@
-# Migración al servidor personal
+# Migración y portabilidad
 
-Esta guía traslada la beta local al servidor sin mezclar datos demostrativos con movimientos Firefly reales.
+La aplicación soporta rutas de instalación configurables y dos topologías explícitas:
 
-## 1. Preparar el servidor
+- `private`: gateway HTTP enlazado a loopback, TLS externo mediante Tailscale Serve u otro proxy privado.
+- `public`: Caddy termina TLS y publica 80/443 solamente cuando se solicita.
 
-Use Ubuntu Server o Debian estable, SSH por clave y firewall. Instale Docker Engine desde su repositorio oficial y el plugin Compose. Abra solo 80/443 públicamente; limite SSH por IP cuando sea posible.
+Para el servidor doméstico actual siga [DEPLOY_PRIVATE_TAILSCALE.md](DEPLOY_PRIVATE_TAILSCALE.md). Esta guía resume los invariantes comunes.
+
+## Preparar un destino
 
 ```bash
-sudo mkdir -p /opt/nuestro-dinero
-sudo chown "$USER":"$USER" /opt/nuestro-dinero
-git clone <URL-DEL-REPOSITORIO> /opt/nuestro-dinero
-cd /opt/nuestro-dinero
+git clone https://github.com/Wilmesa/finanzas-hogar.git /ruta/elegida/app
+cd /ruta/elegida/app
 node scripts/init-env.mjs
+chmod 600 .env
 ```
 
-Edite `.env` y configure dominio, nombres, correos y proveedores. Los secretos ya serán aleatorios.
+La ruta no forma parte de la configuración interna. Use un `COMPOSE_PROJECT_NAME` diferente por entorno para aislar redes, contenedores y volúmenes.
 
-## 2. Dominio y Keycloak
+## Configurar el origen
 
-Apunte el registro DNS A/AAAA al servidor. Después:
+Defina `APP_ORIGIN` como URL HTTPS completa sin ruta. Puede incluir puerto:
+
+```dotenv
+APP_ORIGIN=https://finanzas.example.internal:8446
+```
+
+Después genere el realm runtime sin modificar archivos versionados:
 
 ```bash
 node scripts/configure-domain.mjs
-node scripts/preflight.mjs
+git status --porcelain
 ```
 
-Tras el primer arranque, ingrese a la consola Keycloak, cree dos usuarios, active acciones obligatorias `VERIFY_EMAIL` y `CONFIGURE_TOTP`, y copie el ID interno de cada usuario.
+El estado Git debe permanecer vacío.
 
-En cada usuario configure:
+## Desplegar
 
-```text
-household_id = valor de HOUSEHOLD_ID
-household_role = owner | member
-```
-
-Copie sus IDs a `MEMBER_A_ID` y `MEMBER_B_ID`, vuelva a ejecutar el seed y obligue a ambos a cerrar/iniciar sesión para obtener tokens nuevos.
-
-## 3. Firefly
-
-Abra Firefly solo temporalmente mediante un túnel SSH o puerto local; no lo publique en Caddy. Cree:
-
-- Usuario/contexto del hogar: cuentas visibles, gastos compartidos y asignaciones personales redactadas.
-- Usuario/contexto privado A.
-- Usuario/contexto privado B.
-
-Genere PAT para los tres y guárdelos en `.env`. Nunca los pegue en la PWA, n8n o el proveedor LLM.
-
-Cree al menos una cuenta de activo en cada contexto. La PWA consulta estas cuentas y obliga a escoger una cuenta o tarjeta compatible con el alcance del bolsillo antes de registrar un movimiento.
-
-## 4. Desplegar
+Privado:
 
 ```bash
-scripts/deploy.sh
-docker compose run --rm api pnpm --filter @finanzas/api prisma:seed
-docker compose logs --tail=100 api web firefly keycloak
+DEPLOY_TARGET=private scripts/deploy.sh
 ```
 
-Compruebe `https://DOMINIO`, el login y los certificados TLS.
-
-## 5. Trasladar configuración local
-
-Desde la PWA local use **Más → Exportar y respaldar**. En el servidor use **Más → Importar datos**. Se crean bolsillos, saldos reservados, fuentes, ingresos esperados y planes conservando sus revisiones en orden. Los movimientos locales no se copian a Firefly porque no representan contabilidad bancaria conciliada.
-
-Registre o importe los movimientos reales desde Firefly. Así se evita crear balances falsos.
-
-## 6. n8n
-
-Acceda mediante túnel o proxy administrativo restringido, importe `infra/n8n/daily-reminder.workflow.json`, ejecute manualmente y revise que solo reciba miembros elegibles. Active el workflow después de configurar Web Push o Telegram.
-
-## 7. Aceptación
-
-- Crear bolsillo compartido y verlo desde ambos usuarios.
-- Crear bolsillo privado y confirmar que el otro usuario recibe 404 y no lo ve en analytics.
-- Registrar gasto compartido con una cantidad pequeña y verificar doble entrada en Firefly.
-- Financiar un bolsillo privado desde el hogar y verificar descripción genérica en el libro común.
-- Repetir un request con la misma idempotency key y verificar que no se duplica.
-- Generar un insight de hogar y confirmar ausencia de datos privados.
-- Ejecutar recordatorio y check-in diario.
-
-## 8. Backup, restauración y actualizaciones
+Público tradicional, solo en un host con DNS, firewall y 80/443 aprobados:
 
 ```bash
-scripts/backup.sh
+DEPLOY_TARGET=public scripts/deploy.sh
+```
+
+Los comandos usan `scripts/compose.sh`, que combina el archivo central con el override correcto. No ejecute `docker compose up` sin seleccionar la topología documentada.
+
+## Trasladar datos
+
+- **Servidor completo:** use `scripts/backup.sh`; contiene dumps PostgreSQL, volúmenes necesarios, metadata de Git/imágenes y `env.secrets`.
+- **Modo local de la PWA:** exporte JSON desde **Más** e impórtelo en el servidor. Los movimientos demo no se convierten en movimientos bancarios.
+- **Secretos:** el backup los contiene para recuperación completa, pero nunca se versionan. Cifre la copia externa.
+- **Firefly:** base y upload deben pertenecer al mismo backup.
+- **Entornos:** no restaure accidentalmente dev sobre prod; el script compara proyecto y commit.
+
+## Actualizar
+
+```bash
+git status --porcelain
+DEPLOY_TARGET=private scripts/update-server.sh
+```
+
+La actualización crea backup antes del pull, conserva el target, aplica migraciones y registra rollback en `runtime/deploy/last-update.env`.
+
+## Restaurar
+
+La restauración es destructiva y exige confirmación:
+
+```bash
 RESTORE_CONFIRM=SI_RESTAURAR scripts/restore.sh /ruta/al/backup
 ```
 
-Antes de actualizar imágenes:
+Use primero un entorno aislado. No habilite escrituras hasta verificar balances Firefly, privacidad, autenticación y checksums.
 
-1. Crear y sacar del servidor un backup.
-2. Revisar notas de Firefly, Keycloak, n8n y PostgreSQL.
-3. Probar en un clon o subdominio temporal.
-4. Ejecutar `docker compose pull && docker compose up -d`.
-5. Ejecutar las pruebas de aceptación.
+## Compatibilidad
 
-No use etiquetas `latest`. Al estabilizar la beta, reemplace las etiquetas mayores por digests SHA-256 probados.
-
-## 9. Actualizar desde el repositorio
-
-No edite archivos versionados directamente en el servidor. Los secretos viven en `.env`, que Git ignora. Para aplicar una versión nueva:
-
-```bash
-cd /opt/nuestro-dinero
-scripts/update-server.sh
-```
-
-El script cancela si encuentra cambios locales, crea un backup, ejecuta `git pull --ff-only`, repite el preflight y reconstruye los contenedores. Después revise los logs y repita los casos de aceptación. Si falla, conserve el backup y siga el procedimiento de rollback de la bitácora.
-
-Para fijar una versión conocida en vez de seguir `main`, cree una etiqueta en el repositorio y ejecute en el servidor `git checkout <etiqueta>` antes de desplegar.
+Firefly sigue siendo el libro contable y PostgreSQL la fuente de bolsillos/planes. La migración de infraestructura no cambia contratos REST, esquema Prisma, PWA, OIDC/PKCE, privacidad ni cálculos. El n8n incluido es opcional y el workflow permanece versionado para importación en un n8n externo.

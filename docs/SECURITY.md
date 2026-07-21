@@ -7,7 +7,7 @@
 - Mantener `DEV_AUTH_ENABLED=false` en cualquier servidor accesible por red.
 - Restringir los redirect URI de Keycloak al dominio exacto.
 - Almacenar PAT de Firefly y claves LLM cifradas; nunca enviarlas al navegador o n8n.
-- Habilitar firewall y exponer únicamente 80/443 mediante Caddy.
+- En modo privado, no abrir 80/443 y publicar solo el gateway en loopback mediante Tailscale Serve. En modo público opcional, exponer únicamente 80/443 mediante Caddy.
 - Crear copias cifradas y ejecutar una restauración de prueba.
 - Revisar las políticas de retención del proveedor LLM elegido.
 
@@ -25,13 +25,17 @@ Los snapshots de revisión se autorizan siempre a través del plan padre. Nunca 
 
 ## Modelo de amenaza resumido
 
-| Riesgo                             | Control actual                                                  |
-| ---------------------------------- | --------------------------------------------------------------- |
-| Enumeración de bolsillo privado    | Respuesta 404 y filtros por propietario                         |
-| Duplicación por reintento          | Claves únicas y `external_id` Firefly                           |
-| Fuga por IA                        | Snapshot por alcance, evidencia permitida y validador de salida |
-| Prompt injection en noticias/notas | Los textos se tratan como datos no confiables                   |
-| Robo de PAT Firefly                | Tokens solo servidor; variables secretas                        |
-| Recordatorios reveladores          | Mensaje genérico y canal solicitado por API                     |
+| Riesgo                             | Control actual                                                   |
+| ---------------------------------- | ---------------------------------------------------------------- |
+| Enumeración de bolsillo privado    | Respuesta 404 y filtros por propietario                          |
+| Duplicación por reintento          | Claves únicas y `external_id` Firefly                            |
+| Fuga por IA                        | Snapshot por alcance, evidencia permitida y validador de salida  |
+| Prompt injection en noticias/notas | Los textos se tratan como datos no confiables                    |
+| Robo de PAT Firefly                | Tokens solo servidor; variables secretas                         |
+| Recordatorios reveladores          | Web Push genérico, sin montos, comercios ni nombres de bolsillos |
+| Puertos internos expuestos         | Compose privado solo enlaza gateway a 127.0.0.1                  |
+| Secretos conocidos                 | Interpolación obligatoria, init criptográfico y preflight        |
+
+Los servicios usan dos redes: `edge` para gateway/web/API/Keycloak y `backend` para datos y servicios internos. PostgreSQL y Redis no publican puertos. Los logs Docker rotan a tres archivos de 10 MB. No se aplicaron `read_only`, `cap_drop` o límites rígidos a imágenes de terceros sin una prueba integrada en Docker; hacerlo por intuición puede impedir migraciones, uploads o arranque de identidad.
 
 Antes de una oferta SaaS se requieren pentest, RLS forzado, rotación automatizada de secretos, auditoría de accesos, análisis de dependencias, plan de incidentes y cumplimiento formal de la Ley 1581.

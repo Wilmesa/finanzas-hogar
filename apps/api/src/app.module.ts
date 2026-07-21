@@ -13,8 +13,10 @@ import {
   NewsController,
   PlanningController,
   PocketsController,
+  PushController,
   ProjectionsController,
   TransactionsController,
+  RemindersController,
 } from "./controllers.js";
 import { FireflyClient } from "./firefly.client.js";
 import { PocketsService } from "./pockets.service.js";
@@ -22,6 +24,7 @@ import { NewsService } from "./news.service.js";
 import { PlanningService } from "./planning.service.js";
 import { PrismaService } from "./prisma.service.js";
 import { TransactionsService } from "./transactions.service.js";
+import { RemindersService } from "./reminders.service.js";
 
 @Module({
   controllers: [
@@ -37,6 +40,8 @@ import { TransactionsService } from "./transactions.service.js";
     InsightsController,
     NewsController,
     AutomationController,
+    RemindersController,
+    PushController,
   ],
   providers: [
     PrismaService,
@@ -46,6 +51,7 @@ import { TransactionsService } from "./transactions.service.js";
     AiCfoClient,
     NewsService,
     PlanningService,
+    RemindersService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

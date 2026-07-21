@@ -17,6 +17,24 @@ flowchart LR
 
 Firefly es la fuente canónica de movimientos reales. PostgreSQL es la fuente canónica de políticas de bolsillos, visibilidad, atribuciones, planificación y escenarios. El AI-CFO es estrictamente de lectura.
 
+## Topologías de despliegue
+
+`docker-compose.yml` no publica puertos y define servicios, redes y volúmenes centrales. `docker-compose.private.yml` añade un gateway HTTP enlazado exclusivamente a `127.0.0.1`, pensado para TLS terminado por Tailscale. `docker-compose.public.yml` añade Caddy con 80/443 solo cuando se selecciona explícitamente `DEPLOY_TARGET=public`. El n8n incluido pertenece al perfil `bundled-n8n` y no arranca por defecto.
+
+```mermaid
+flowchart LR
+  TS["Tailscale Serve HTTPS"] -->|"127.0.0.1:3100 HTTP"| GW["Gateway Caddy"]
+  GW --> WEB["PWA"]
+  GW --> API["API"]
+  GW --> KC["Keycloak"]
+  API --> PG["PostgreSQL"]
+  API --> REDIS["Redis"]
+  API --> FF["Firefly"]
+  API --> AI["AI-CFO"]
+```
+
+`APP_ORIGIN` conserva esquema, hostname y puerto externo; las rutas internas usan DNS Compose. `COMPOSE_PROJECT_NAME` separa completamente dev y producción.
+
 ## Planificación financiera
 
 El módulo distingue fuente reutilizable, ingreso esperado fechado, plan, asignación y revisión. Esto evita convertir primas o alquileres futuros en saldo disponible y conserva la historia de acuerdos. Las asignaciones usan cantidad fija, porcentaje o remanente y solo pueden enlazar objetos con el mismo hogar, alcance y moneda. Consulte [el diseño completo](PLANNING.md).
