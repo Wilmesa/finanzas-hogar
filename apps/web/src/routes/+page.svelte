@@ -8,7 +8,8 @@
   let accountId = $state("");
   let merchant = $state("");
   let category = $state("Mercado");
-  let payer = $state("Ana");
+  let payerMemberId = $state("");
+  let scope = $state<"household" | "private">("household");
   let saving = $state(false);
   let formError = $state("");
 
@@ -33,6 +34,8 @@
   const budgetUsed = $derived(
     dailyPocket ? Math.min(100, Math.round(((dailyPocket.targetAmount - dailyPocket.currentAmount) / dailyPocket.targetAmount) * 100)) : 0,
   );
+  const latestInsight = $derived($financeData.insights.find((item) => item.scope === scope));
+  const latestBundle = $derived(latestInsight?.payload.bundle);
 
   async function saveTransaction() {
     formError = "";
@@ -59,7 +62,7 @@
         accountId: selectedAccountId,
         merchant: merchant.trim(),
         category,
-        payer,
+        payerMemberId: payerMemberId || $financeData.settings.memberId,
       });
       amount = undefined;
       merchant = "";
@@ -74,9 +77,10 @@
 
 <div class="page home-page">
   <header class="page-header">
-    <div><span class="eyebrow">{new Intl.DateTimeFormat("es-CO", { dateStyle: "full" }).format(new Date())}</span><h1>Buenos días, {$financeData.settings.memberName}</h1><p>Así va el dinero de ustedes este mes.</p></div>
-    <button class="avatar-button" aria-label="Abrir perfil">A</button>
+    <div><span class="eyebrow">{new Intl.DateTimeFormat("es-CO", { dateStyle: "full" }).format(new Date())}</span><h1>Buenos días, {$financeData.settings.memberName}</h1><p>{$financeData.settings.householdName} · datos actualizados desde Firefly.</p></div>
+    <a class="avatar-button" href="/household" aria-label="Abrir perfil">{$financeData.settings.memberAvatar ?? $financeData.settings.memberName.slice(0,1).toUpperCase()}</a>
   </header>
+  <div class="filter-tabs"><button class:active={scope === "household"} onclick={() => (scope = "household")}>Compartido</button><button class:active={scope === "private"} onclick={() => (scope = "private")}>Solo yo</button></div>
 
   <section class="hero-balance">
     <div>
@@ -91,10 +95,11 @@
     </div>
   </section>
 
-  <section class="insight-card">
-    <span class="spark">✦</span>
-    <div><span class="eyebrow">Insight de hoy</span><h2>El gasto en comidas fuera subió 24 %</h2><p>Reducir dos pedidos este mes liberaría cerca de {currency(118_000)} para la cuota inicial.</p><button class="text-button">Ver 7 movimientos →</button></div>
-  </section>
+  {#if latestBundle}
+    <section class="insight-card"><span class="spark">✦</span><div><span class="eyebrow">Copiloto · {latestInsight?.payload.provider} · {new Date(latestInsight?.createdAt ?? "").toLocaleDateString("es-CO")}</span><h2>{latestBundle.status === "ok" ? "Análisis financiero verificado" : "Datos insuficientes"}</h2><p>{latestBundle.summary}</p><a class="text-button" href="/copilot">Ver evidencia →</a></div></section>
+  {:else}
+    <section class="insight-card neutral"><span class="spark">✦</span><div><span class="eyebrow">Copiloto</span><h2>Sin análisis generado</h2><p>Aún no hay suficientes movimientos para generar un análisis confiable.</p><a class="text-button" href="/copilot">Revisar AI-CFO →</a></div></section>
+  {/if}
 
   <section class="section-block">
     <header class="section-heading"><div><span class="eyebrow">Dinero con propósito</span><h2>Bolsillos activos</h2></div><a href="/pockets">Ver todos</a></header>
@@ -132,9 +137,9 @@
       <header><div><span class="eyebrow">Movimiento rápido</span><h2 id="quick-title">Registrar gasto</h2></div><button class="icon-button" onclick={() => (showQuickEntry = false)} aria-label="Cerrar">×</button></header>
       <div class="amount-input"><span>$</span><input aria-label="Cantidad" inputmode="decimal" placeholder="0" type="number" min="1" bind:value={amount} /></div>
       <label>¿De qué bolsillo?<select bind:value={pocketId}>{#each pockets as pocket}<option value={pocket.id}>{pocket.name} · {pocket.visibility === "private" ? "Solo yo" : "Compartido"}</option>{/each}</select></label>
-      <label>Cuenta o tarjeta<select bind:value={accountId}>{#each $financeData.accounts.filter((account) => account.scope === (pockets.find((pocket) => pocket.id === pocketId)?.visibility ?? pockets[0]?.visibility)) as account}<option value={account.id}>{account.name} · {account.currency}</option>{/each}</select></label>
+      <label>Cuenta o tarjeta<select bind:value={accountId}>{#each $financeData.accounts.filter((account) => account.scope === (pockets.find((pocket) => pocket.id === pocketId)?.visibility ?? pockets[0]?.visibility)) as account}<option value={account.id}>{account.name} · {account.currency}</option>{/each}</select>{#if !$financeData.accounts.some((account) => account.scope === (pockets.find((pocket) => pocket.id === pocketId)?.visibility ?? pockets[0]?.visibility))}<small>No hay cuentas en este alcance. <a href="/accounts">Crear cuenta</a></small>{/if}</label>
       <label>Comercio o descripción<input placeholder="Ej. mercado semanal" bind:value={merchant} /></label>
-      <div class="form-row"><label>Categoría<select bind:value={category}><option>Mercado</option><option>Transporte</option><option>Restaurantes</option><option>Vivienda</option><option>Salud</option><option>Otros</option></select></label><label>Pagó<select bind:value={payer}><option>Ana</option><option>Leo</option></select></label></div>
+      <div class="form-row"><label>Categoría<select bind:value={category}><option>Mercado</option><option>Transporte</option><option>Restaurantes</option><option>Vivienda</option><option>Salud</option><option>Otros</option></select></label><label>Pagó<select bind:value={payerMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label></div>
       {#if formError}<p class="form-error" role="alert">{formError}</p>{/if}
       <button class="primary-button" disabled={saving} onclick={saveTransaction}>{saving ? "Guardando…" : "Guardar gasto"}</button>
     </div>

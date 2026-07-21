@@ -4,8 +4,8 @@ import { build, files, version } from "$service-worker";
 
 declare const self: ServiceWorkerGlobalScope;
 
-const STATIC_CACHE = `nuestro-dinero-static-${version}`;
-const PAGE_CACHE = `nuestro-dinero-pages-${version}`;
+const STATIC_CACHE = `finnest-static-${version}`;
+const PAGE_CACHE = `finnest-pages-${version}`;
 const PRECACHE = [...build, ...files].filter(
   (path) =>
     !path.endsWith(".map") &&
@@ -29,7 +29,8 @@ self.addEventListener("activate", (event) => {
           keys
             .filter(
               (key) =>
-                key.startsWith("nuestro-dinero-") &&
+                (key.startsWith("nuestro-dinero-") ||
+                  key.startsWith("finnest-")) &&
                 key !== STATIC_CACHE &&
                 key !== PAGE_CACHE,
             )
@@ -66,7 +67,7 @@ self.addEventListener("fetch", (event) => {
           const home = await caches.match("/");
           if (home) return home;
           return new Response(
-            "<!doctype html><html lang='es'><meta name='viewport' content='width=device-width'><title>Sin conexión</title><style>body{font:16px system-ui;background:#f5f2ea;color:#12261f;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}main{max-width:32rem}button{padding:12px 18px;border:0;border-radius:999px;background:#12261f;color:white}</style><main><h1>Estás sin conexión</h1><p>Abre una pantalla visitada antes o recupera la conexión. Tus capturas locales permanecen en este dispositivo.</p><button onclick='location.reload()'>Reintentar</button></main>",
+            "<!doctype html><html lang='es'><meta name='viewport' content='width=device-width'><title>FinNest sin conexión</title><style>body{font:16px system-ui;background:#f8fafc;color:#0f172a;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}main{max-width:32rem}button{padding:12px 18px;border:0;border-radius:999px;background:#059669;color:white}</style><main><h1>Estás sin conexión</h1><p>FinNest no guarda respuestas financieras en caché. Recupera la conexión para sincronizar con Firefly.</p><button onclick='location.reload()'>Reintentar</button></main>",
             { headers: { "Content-Type": "text/html; charset=utf-8" } },
           );
         }),
@@ -103,7 +104,7 @@ self.addEventListener("push", (event) => {
     payload = {};
   }
   event.waitUntil(
-    self.registration.showNotification(payload.title ?? "Nuestro Dinero", {
+    self.registration.showNotification(payload.title ?? "FinNest", {
       body: payload.body ?? "¿Ya registraste los movimientos de hoy?",
       icon: "/icons/icon-192.png",
       badge: "/icons/icon-192.png",

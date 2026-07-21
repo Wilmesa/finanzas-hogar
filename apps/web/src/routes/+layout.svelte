@@ -6,6 +6,7 @@
   import LocalLogin from "$lib/LocalLogin.svelte";
   import { page } from "$app/state";
   import { onMount } from "svelte";
+  import "$lib/theme";
   let { children } = $props();
   let loading = $state(true);
   let authenticated = $state(false);
@@ -33,16 +34,16 @@
   }
 </script>
 
-<svelte:head><title>Nuestro Dinero</title></svelte:head>
+<svelte:head><title>FinNest · Finanzas en pareja</title></svelte:head>
 {#if loading}
-  <div class="auth-screen"><span class="brand-mark">N</span><p>Preparando tu hogar…</p></div>
+  <div class="auth-screen"><span class="brand-mark">F</span><p>Preparando FinNest…</p></div>
 {:else if error}
-  <div class="auth-screen"><span class="brand-mark">N</span><h1>No pudimos conectar</h1><p>{error}</p><button class="primary-button" onclick={() => location.reload()}>Reintentar</button></div>
+  <div class="auth-screen"><span class="brand-mark">F</span><h1>No pudimos conectar</h1><p>{error}</p><button class="primary-button" onclick={() => location.reload()}>Reintentar</button></div>
 {:else if !authenticated && isServerMode()}
   <div class="auth-screen">
-    <span class="brand-mark large">N</span>
+    <span class="brand-mark large">F</span>
     <span class="eyebrow">Finanzas en pareja</span>
-    <h1>Un lugar tranquilo para su dinero</h1>
+    <h1>Su dinero, coordinado con propósito</h1>
     <p>Ingresa de forma segura para consultar el hogar y tus bolsillos privados.</p>
     {#if authMode() === "local"}
       <LocalLogin onSuccess={localLoginSucceeded} />

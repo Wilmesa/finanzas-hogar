@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Nuestro Dinero">
-  <rect width="512" height="512" rx="112" fill="#12261f"/>
-  <circle cx="374" cy="138" r="76" fill="#c7e86d"/>
-  <path d="M132 358V154l248 204V154" fill="none" stroke="#f5f2ea" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FinNest">
+  <rect width="512" height="512" rx="112" fill="#059669"/>
+  <circle cx="256" cy="196" r="58" fill="#DBEAFE"/>
+  <path d="M112 294c42 94 246 94 288 0M132 336c58 76 190 76 248 0M164 378c54 42 130 42 184 0" fill="none" stroke="#F8FAFC" stroke-width="30" stroke-linecap="round"/>
+  <path d="M166 176c20-62 72-98 132-88" fill="none" stroke="#2563EB" stroke-width="24" stroke-linecap="round"/>
 </svg>

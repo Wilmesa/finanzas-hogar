@@ -11,7 +11,7 @@
   let accountId = $state("");
   let merchant = $state("");
   let category = $state("Mercado");
-  let payer = $state("Ana");
+  let payerMemberId = $state("");
   let error = $state("");
   const pockets = $derived($financeData.pockets);
   const transactions = $derived(
@@ -50,7 +50,7 @@
         accountId: selectedAccountId,
         merchant: merchant.trim(),
         category,
-        payer,
+        payerMemberId: payerMemberId || $financeData.settings.memberId,
       });
       registering = false;
       amount = undefined;
@@ -64,7 +64,7 @@
   <header class="page-header"><div><span class="eyebrow">Todo conciliado</span><h1>Movimientos</h1><p>Quién pagó, desde dónde y para qué.</p></div><button class="primary-button" onclick={() => (registering = !registering)}>＋ Registrar</button></header>
   {#if registering}
     <section class="panel inline-entry">
-      <div class="form-grid"><label>Cantidad<input type="number" min="1" bind:value={amount} /></label><label>Bolsillo<select bind:value={pocketId}>{#each pockets as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</select></label><label>Cuenta o tarjeta<select bind:value={accountId}>{#each $financeData.accounts.filter((account) => account.scope === (pockets.find((pocket) => pocket.id === pocketId)?.visibility ?? pockets[0]?.visibility)) as account}<option value={account.id}>{account.name} · {account.currency}</option>{/each}</select></label><label>Comercio o descripción<input bind:value={merchant} /></label><label>Categoría<select bind:value={category}><option>Mercado</option><option>Transporte</option><option>Restaurantes</option><option>Vivienda</option><option>Salud</option><option>Otros</option></select></label><label>Pagó<select bind:value={payer}><option>Ana</option><option>Leo</option></select></label></div>
+      <div class="form-grid"><label>Cantidad<input type="number" min="1" bind:value={amount} /></label><label>Bolsillo<select bind:value={pocketId}>{#each pockets as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</select></label><label>Cuenta o tarjeta<select bind:value={accountId}>{#each $financeData.accounts.filter((account) => account.scope === (pockets.find((pocket) => pocket.id === pocketId)?.visibility ?? pockets[0]?.visibility)) as account}<option value={account.id}>{account.name} · {account.currency}</option>{/each}</select>{#if !$financeData.accounts.length}<small>Crea una cuenta desde <a href="/accounts">Cuentas</a>.</small>{/if}</label><label>Comercio o descripción<input bind:value={merchant} /></label><label>Categoría<select bind:value={category}><option>Mercado</option><option>Transporte</option><option>Restaurantes</option><option>Vivienda</option><option>Salud</option><option>Otros</option></select></label><label>Pagó<select bind:value={payerMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label></div>
       {#if error}<p class="form-error">{error}</p>{/if}<button class="primary-button" onclick={save}>Guardar movimiento</button>
     </section>
   {/if}

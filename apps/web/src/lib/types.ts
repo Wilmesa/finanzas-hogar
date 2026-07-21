@@ -11,6 +11,8 @@ export interface PocketView {
   policyKind?: "target_by_date" | "target_by_contribution" | "periodic_spend";
   targetDate?: string;
   monthlyContribution?: number;
+  version?: number;
+  status?: "active" | "paused" | "completed" | "archived";
 }
 
 export interface TransactionView {
@@ -34,6 +36,84 @@ export interface AccountView {
   currency: string;
   currentBalance: number;
   scope: "household" | "private";
+}
+
+export interface AccountConnectionView {
+  scope: "household" | "private";
+  configured: boolean;
+  status: "available" | "unavailable";
+  message?: string;
+}
+
+export interface MemberView {
+  id: string;
+  displayName: string;
+  email: string;
+  username?: string | null;
+  role: "owner" | "member";
+  avatar?: string | null;
+  color: string;
+}
+
+export interface AiStatusView {
+  status: string;
+  provider: string;
+  providerName?: string;
+  model: string | null;
+  keyPresent: boolean;
+  generationEnabled: boolean;
+}
+
+export interface InsightView {
+  id: string;
+  scope: "household" | "private";
+  periodStart: string;
+  periodEnd: string;
+  createdAt: string;
+  payload: {
+    provider?: string;
+    model?: string | null;
+    generatedAt?: string;
+    title?: string;
+    estimatedImpact?: string | null;
+    priority?: "low" | "medium" | "high";
+    confidence?: number | null;
+    suggestedAction?: string | null;
+    evidence?: Array<{
+      id: string;
+      kind: string;
+      label: string;
+      value: string;
+    }>;
+    bundle?: {
+      status: "ok" | "insufficient_data";
+      summary: string;
+      alerts: Array<{
+        severity: string;
+        message: string;
+        evidenceIds: string[];
+      }>;
+      spendingFindings: Array<{
+        title: string;
+        amount: string;
+        comparison: string;
+        evidenceIds: string[];
+      }>;
+      opportunities: Array<{
+        action: string;
+        estimatedMonthlyImpact: string;
+        confidence: number;
+        evidenceIds: string[];
+      }>;
+      goals: Array<{ pocketId: string; status: string; explanation: string }>;
+      news: Array<{
+        sourceUrl: string;
+        publishedAt: string;
+        factSummary: string;
+        possibleImpact: string;
+      }>;
+    };
+  };
 }
 
 export interface IncomeSourceView {
@@ -96,15 +176,24 @@ export interface FundingPlanView {
 }
 
 export interface FinanceState {
-  schemaVersion: 2;
+  schemaVersion: 3;
   pockets: PocketView[];
   transactions: TransactionView[];
   accounts: AccountView[];
+  accountConnections: AccountConnectionView[];
+  members: MemberView[];
+  insights: InsightView[];
+  aiStatus: AiStatusView;
   incomeSources: IncomeSourceView[];
   expectedIncomes: ExpectedIncomeView[];
   fundingPlans: FundingPlanView[];
   settings: {
     memberName: string;
+    memberId: string;
+    memberEmail: string;
+    memberRole: "owner" | "member";
+    memberAvatar?: string | null;
+    memberColor: string;
     householdName: string;
     baseCurrency: string;
     dailyReminder: string;

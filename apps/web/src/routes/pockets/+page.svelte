@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { allocateToPocket, createPocket, financeData } from "$lib/finance-store";
+  import { allocateToPocket, createPocket, financeData, setPocketStatus } from "$lib/finance-store";
   import PocketCard from "$lib/PocketCard.svelte";
   let filter = $state<"all" | "household" | "private">("all");
   let creating = $state(false);
@@ -15,6 +15,7 @@
   let error = $state("");
   let allocatingPocketId = $state<string | null>(null);
   let allocationAmount = $state<number | undefined>();
+  let actionError = $state("");
   const pockets = $derived($financeData.pockets);
   const visible = $derived(filter === "all" ? pockets : pockets.filter((pocket) => pocket.visibility === filter));
 
@@ -57,6 +58,12 @@
     allocatingPocketId = null;
     allocationAmount = undefined;
   }
+
+  async function changeStatus(pocket: (typeof pockets)[number], status: "active" | "paused" | "archived") {
+    actionError = "";
+    try { await setPocketStatus(pocket, status); }
+    catch (cause) { actionError = cause instanceof Error ? cause.message : "No pudimos actualizar el bolsillo"; }
+  }
 </script>
 
 <div class="page">
@@ -83,7 +90,9 @@
       <button class="primary-button" disabled={saving} onclick={savePocket}>{saving ? "Creando…" : "Calcular y crear"}</button>
     </section>
   {/if}
-  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} /><button class="pocket-action" onclick={() => (allocatingPocketId = pocket.id)}>＋ Aportar</button></div>{/each}</div>
+  {#if actionError}<p class="form-error" role="alert">{actionError}</p>{/if}
+  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} /><div class="pocket-actions"><button onclick={() => (allocatingPocketId = pocket.id)}>＋ Aportar</button><button onclick={() => changeStatus(pocket, pocket.status === "paused" ? "active" : "paused")}>{pocket.status === "paused" ? "Reanudar" : "Pausar"}</button><button onclick={() => confirm(`¿Archivar ${pocket.name}?`) && changeStatus(pocket, "archived")}>Archivar</button></div></div>{/each}</div>
+  {#if visible.length === 0}<div class="empty-state panel"><strong>No hay bolsillos en esta vista</strong><p>Crea uno compartido o privado para reservar dinero con propósito.</p></div>{/if}
   <button class="fab mobile-only" onclick={() => (creating = !creating)}><span>＋</span> Nuevo</button>
 </div>
 

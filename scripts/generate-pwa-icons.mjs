@@ -44,22 +44,34 @@ function png(size, maskable = false) {
     for (let x = 0; x < size; x += 1) {
       const px = x / scale;
       const py = y / scale;
-      let color = [18, 38, 31, 255];
-      if (Math.hypot(px - 374, py - 138) <= 76) color = [199, 232, 109, 255];
-      const stroke = 26;
-      const segments = [
-        [132 + safe, 358 - safe, 132 + safe, 154 + safe],
-        [132 + safe, 154 + safe, 380 - safe, 358 - safe],
-        [380 - safe, 358 - safe, 380 - safe, 154 + safe],
+      let color = [5, 150, 105, 255];
+      if (Math.hypot(px - 256, py - 196) <= 58 - safe * 0.15)
+        color = [219, 234, 254, 255];
+      const bowls = [
+        { cy: 244, rx: 150 - safe, ry: 100 - safe * 0.4 },
+        { cy: 286, rx: 124 - safe * 0.7, ry: 78 - safe * 0.3 },
+        { cy: 330, rx: 92 - safe * 0.5, ry: 54 - safe * 0.2 },
       ];
       if (
-        segments.some(
-          ([ax, ay, bx, by]) =>
-            distanceToSegment(px, py, ax, ay, bx, by) <= stroke,
-        )
-      ) {
-        color = [245, 242, 234, 255];
-      }
+        bowls.some(({ cy, rx, ry }) => {
+          const normalized = Math.sqrt(
+            ((px - 256) / rx) ** 2 + ((py - cy) / ry) ** 2,
+          );
+          return py >= cy && normalized > 0.88 && normalized < 1.12;
+        })
+      )
+        color = [248, 250, 252, 255];
+      if (
+        distanceToSegment(
+          px,
+          py,
+          170 + safe,
+          176 + safe,
+          298 - safe,
+          88 + safe,
+        ) <= 12
+      )
+        color = [37, 99, 235, 255];
       const pixel = offset + 1 + x * 4;
       rows.set(color, pixel);
     }

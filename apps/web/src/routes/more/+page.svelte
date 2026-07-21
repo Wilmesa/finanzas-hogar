@@ -1,24 +1,17 @@
 <script lang="ts">
-  import { exportFinanceData, importFinanceData, resetLocalData } from "$lib/finance-store";
+  import { exportFinanceData, financeData, importFinanceData, resetLocalData } from "$lib/finance-store";
   import { authMode, changeLocalPassword, isServerMode, logout } from "$lib/auth";
   import { apiRequest } from "$lib/api";
   import PwaStatus from "$lib/PwaStatus.svelte";
   import NotificationSettings from "$lib/NotificationSettings.svelte";
   import { onMount } from "svelte";
+  import { themePreference, type ThemePreference } from "$lib/theme";
   let message = $state("");
   let error = $state("");
   let currentPassword = $state("");
   let newPassword = $state("");
   let confirmPassword = $state("");
-  let news = $state([
-    {
-      source: "Banco de la República",
-      sourceUrl: "https://www.banrep.gov.co/es/press-releases-board?page=1",
-      title: "La decisión de tasas y lo que puede significar para tus metas",
-      factSummary: "Consulta la publicación oficial y revisa tasas de CDT y crédito antes de renovar o refinanciar.",
-      publishedAt: new Date().toISOString(),
-    },
-  ]);
+  let news = $state<Array<{ source: string; sourceUrl: string; title: string; factSummary: string; publishedAt: string }>>([]);
 
   onMount(async () => {
     if (!isServerMode()) return;
@@ -35,10 +28,14 @@
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `nuestro-dinero-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.download = `finnest-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
     message = "Exportación creada. Guárdala fuera de este dispositivo.";
+  }
+
+  function selectTheme(event: Event) {
+    themePreference.set((event.currentTarget as HTMLSelectElement).value as ThemePreference);
   }
 
   async function importFile(event: Event) {
@@ -81,7 +78,8 @@
 </script>
 
 <div class="page">
-  <header class="page-header"><div><span class="eyebrow">Contexto y control</span><h1>Más</h1><p>Noticias, automatizaciones y configuración del hogar.</p></div></header>
+  <header class="page-header"><div><span class="eyebrow">Contexto y control</span><h1>Configuración</h1><p>Hogar, apariencia, noticias, automatizaciones y respaldo.</p></div></header>
+  <section class="panel"><span class="eyebrow">Apariencia</span><h2>Tema de FinNest</h2><label>Preferencia<select value={$themePreference} onchange={selectTheme}><option value="system">Seguir sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select></label></section>
   <PwaStatus />
   <NotificationSettings />
   {#if isServerMode() && authMode() === "local"}
@@ -96,10 +94,13 @@
     </details>
   {/if}
   <section class="news-layout">
-    <article class="featured-news"><span class="eyebrow">{news[0]?.source} · {new Date(news[0]?.publishedAt ?? Date.now()).toLocaleDateString("es-CO")}</span><h2>{news[0]?.title}</h2><p><strong>Hecho publicado:</strong> {news[0]?.factSummary}</p><a href={news[0]?.sourceUrl} target="_blank" rel="noreferrer">Abrir fuente original ↗</a></article>
+    {#if news[0]}<article class="featured-news"><span class="eyebrow">{news[0].source} · {new Date(news[0].publishedAt).toLocaleDateString("es-CO")}</span><h2>{news[0].title}</h2><p><strong>Hecho publicado:</strong> {news[0].factSummary}</p><a href={news[0].sourceUrl} target="_blank" rel="noreferrer">Abrir fuente original ↗</a></article>{:else}<article class="featured-news empty-news"><span class="eyebrow">Contexto económico</span><h2>Sin noticias verificadas</h2><p>Cuando la ingesta encuentre fuentes oficiales, aparecerán aquí con fecha y enlace original.</p></article>{/if}
     <div class="settings-list">
-      <a href="/more"><span class="settings-icon">✦</span><span><strong>Insights financieros</strong><small>Hallazgos con evidencia y feedback</small></span><b>›</b></a>
-      <a href="/more"><span class="settings-icon">♙</span><span><strong>Nuestro hogar</strong><small>2 miembros · COP</small></span><b>›</b></a>
+      <a href="/copilot"><span class="settings-icon">✦</span><span><strong>AI-CFO</strong><small>Estado, análisis y evidencia</small></span><b>›</b></a>
+      <a href="/household"><span class="settings-icon">♙</span><span><strong>Hogar y perfiles</strong><small>{$financeData.members.length} miembros · {$financeData.settings.baseCurrency}</small></span><b>›</b></a>
+      <a href="/accounts"><span class="settings-icon">◇</span><span><strong>Cuentas y tarjetas</strong><small>Libros compartido y privado en Firefly</small></span><b>›</b></a>
+      <a href="/pockets"><span class="settings-icon">◎</span><span><strong>Bolsillos</strong><small>Propósitos, metas y privacidad</small></span><b>›</b></a>
+      <a href="/onboarding"><span class="settings-icon">✓</span><span><strong>Revisar configuración</strong><small>Diagnóstico guiado de FinNest</small></span><b>›</b></a>
       <button onclick={downloadExport}><span class="settings-icon">⇩</span><span><strong>Exportar y respaldar</strong><small>Descargar un JSON portable</small></span><b>›</b></button>
       <label class="import-action"><span class="settings-icon">⇧</span><span><strong>Importar datos</strong><small>Restaurar una exportación JSON</small></span><b>›</b><input class="sr-only" type="file" accept="application/json" onchange={importFile} /></label>
       {#if !isServerMode()}<button onclick={reset}><span class="settings-icon">↺</span><span><strong>Restaurar demostración</strong><small>Elimina cambios locales</small></span><b>›</b></button>{/if}
