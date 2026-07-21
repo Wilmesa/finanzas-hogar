@@ -9,6 +9,7 @@ import {
   safeDailySpend,
   planningTimeBucket,
   generateRecurringIncomeDates,
+  CreatePocketSchema,
 } from "./index.js";
 
 describe("Pocket Engine", () => {
@@ -53,15 +54,53 @@ describe("Pocket Engine", () => {
   it("oculta un bolsillo privado a otros miembros", () => {
     const pocket = {
       visibility: "private" as const,
-      ownerMemberId: "ana",
+      ownerMemberId: "owner",
       householdId: "casa",
     };
     expect(
-      canReadPocket(pocket, { memberId: "ana", householdId: "casa" }),
+      canReadPocket(pocket, { memberId: "owner", householdId: "casa" }),
     ).toBe(true);
     expect(
-      canReadPocket(pocket, { memberId: "leo", householdId: "casa" }),
+      canReadPocket(pocket, { memberId: "partner", householdId: "casa" }),
     ).toBe(false);
+  });
+
+  it.each([
+    "daily_spend",
+    "sinking_fund",
+    "purchase",
+    "emergency",
+    "debt",
+    "investment",
+    "real_estate",
+    "custom",
+  ] as const)(
+    "acepta el propósito %s con una política periódica",
+    (purpose) => {
+      const parsed = CreatePocketSchema.parse({
+        name: `Bolsillo ${purpose}`,
+        purpose,
+        visibility: "household",
+        currency: "cop",
+        currentAmount: "0",
+        policy: { kind: "periodic_spend", limit: "100000", period: "monthly" },
+      });
+      expect(parsed.currency).toBe("COP");
+      expect(parsed.purpose).toBe(purpose);
+    },
+  );
+
+  it("rechaza límites periódicos vacíos, cero o negativos", () => {
+    for (const limit of ["", "0", "-1", "no-es-numero"]) {
+      expect(
+        CreatePocketSchema.safeParse({
+          name: "Vida diaria",
+          purpose: "daily_spend",
+          currency: "COP",
+          policy: { kind: "periodic_spend", limit, period: "monthly" },
+        }).success,
+      ).toBe(false);
+    }
   });
 
   it("distribuye ingreso por prioridad y remanente", () => {

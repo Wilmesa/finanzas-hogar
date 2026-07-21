@@ -20,8 +20,8 @@ async function main() {
     create: {
       id: memberAId,
       householdId,
-      displayName: process.env.MEMBER_A_NAME ?? "Ana",
-      email: process.env.MEMBER_A_EMAIL ?? "ana@example.local",
+      displayName: process.env.MEMBER_A_NAME ?? "Persona 1",
+      email: process.env.MEMBER_A_EMAIL ?? "persona1@example.local",
       role: "owner",
     },
   });
@@ -31,8 +31,8 @@ async function main() {
     create: {
       id: memberBId,
       householdId,
-      displayName: process.env.MEMBER_B_NAME ?? "Leo",
-      email: process.env.MEMBER_B_EMAIL ?? "leo@example.local",
+      displayName: process.env.MEMBER_B_NAME ?? "Persona 2",
+      email: process.env.MEMBER_B_EMAIL ?? "persona2@example.local",
       role: "member",
     },
   });

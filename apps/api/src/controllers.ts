@@ -10,8 +10,10 @@ import {
   Post,
   Put,
   Query,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import {
   amortizeDebt,
   previewIncomeAllocation,
@@ -30,6 +32,7 @@ import { NewsService } from "./news.service.js";
 import { FireflyClient } from "./firefly.client.js";
 import { PlanningService } from "./planning.service.js";
 import { RemindersService } from "./reminders.service.js";
+import { HouseholdService } from "./household.service.js";
 import {
   TransactionsService,
   type CreateTransactionInput,
@@ -44,6 +47,42 @@ export class HealthController {
       service: "finanzas-api",
       timestamp: new Date().toISOString(),
     };
+  }
+}
+
+@Controller("v1")
+export class HouseholdController {
+  constructor(private readonly households: HouseholdService) {}
+
+  @Get("household")
+  household(@CurrentActor() actor: Actor) {
+    return this.households.get(actor);
+  }
+
+  @Patch("household")
+  updateHousehold(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.households.updateHousehold(
+      actor,
+      body as { name?: string; baseCurrency?: string; timezone?: string },
+    );
+  }
+
+  @Patch("profile")
+  updateProfile(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.households.updateProfile(
+      actor,
+      body as { displayName?: string; avatar?: string | null; color?: string },
+    );
+  }
+
+  @Get("onboarding/status")
+  onboarding(@CurrentActor() actor: Actor) {
+    return this.households.onboarding(actor);
+  }
+
+  @Post("onboarding/complete")
+  complete(@CurrentActor() actor: Actor) {
+    return this.households.completeOnboarding(actor);
   }
 }
 
@@ -64,6 +103,20 @@ export class PocketsController {
   @Get(":id")
   find(@Param("id") id: string, @CurrentActor() actor: Actor) {
     return this.pockets.find(id, actor);
+  }
+
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.pockets.update(id, body, actor);
+  }
+
+  @Delete(":id")
+  archive(@Param("id") id: string, @CurrentActor() actor: Actor) {
+    return this.pockets.archive(id, actor);
   }
 
   @Get(":id/projection")
@@ -132,11 +185,103 @@ export class AccountsController {
 
   @Get()
   async list(@CurrentActor() actor: Actor) {
-    const [household, privateAccounts] = await Promise.all([
+    const results = await Promise.allSettled([
       this.firefly.listAssetAccounts("household", actor.memberId),
       this.firefly.listAssetAccounts("private", actor.memberId),
     ]);
-    return [...household, ...privateAccounts];
+    const scopes = ["household", "private"] as const;
+    return {
+      accounts: results.flatMap((result) =>
+        result.status === "fulfilled" ? result.value : [],
+      ),
+      connections: results.map((result, index) => ({
+        scope: scopes[index],
+        configured: this.firefly.hasToken(scopes[index]!, actor.memberId),
+        status: result.status === "fulfilled" ? "available" : "unavailable",
+        ...(result.status === "rejected"
+          ? { message: "Este libro no está disponible en este momento" }
+          : {}),
+      })),
+    };
+  }
+
+  private scope(value: string): "household" | "private" {
+    if (value !== "household" && value !== "private") {
+      throw new BadRequestException("El alcance de cuenta no es válido");
+    }
+    return value;
+  }
+
+  @Post()
+  create(
+    @Body()
+    body: {
+      name?: string;
+      type?:
+        | "cash"
+        | "checking"
+        | "savings"
+        | "digital_wallet"
+        | "credit_card"
+        | "investment"
+        | "other_asset"
+        | "liability";
+      currency?: string;
+      scope?: string;
+      openingBalance?: string;
+      openingBalanceDate?: string;
+    },
+    @CurrentActor() actor: Actor,
+  ) {
+    if (!body.name || !body.type || !body.currency || !body.scope) {
+      throw new BadRequestException(
+        "Nombre, tipo, moneda y alcance son obligatorios",
+      );
+    }
+    return this.firefly.createAccount(
+      {
+        name: body.name,
+        type: body.type,
+        currency: body.currency,
+        ...(body.openingBalance !== undefined
+          ? { openingBalance: body.openingBalance }
+          : {}),
+        ...(body.openingBalanceDate
+          ? { openingBalanceDate: body.openingBalanceDate }
+          : {}),
+      },
+      this.scope(body.scope),
+      actor.memberId,
+    );
+  }
+
+  @Patch(":scope/:id")
+  update(
+    @Param("scope") scope: string,
+    @Param("id") id: string,
+    @Body() body: { name?: string; currency?: string },
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.firefly.updateAccount(
+      id,
+      body,
+      this.scope(scope),
+      actor.memberId,
+    );
+  }
+
+  @Delete(":scope/:id")
+  archive(
+    @Param("scope") scope: string,
+    @Param("id") id: string,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.firefly.archiveAccount(id, this.scope(scope), actor.memberId);
+  }
+
+  @Post(":scope/test")
+  test(@Param("scope") scope: string, @CurrentActor() actor: Actor) {
+    return this.firefly.testConnection(this.scope(scope), actor.memberId);
   }
 }
 
@@ -305,6 +450,20 @@ export class InsightsController {
     private readonly ai: AiCfoClient,
   ) {}
 
+  @Get()
+  list(@CurrentActor() actor: Actor, @Query("scope") requestedScope?: string) {
+    const scope = requestedScope === "private" ? "private" : "household";
+    return this.prisma.insight.findMany({
+      where: {
+        householdId: actor.householdId,
+        scope,
+        ...(scope === "private" ? { ownerMemberId: actor.memberId } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+  }
+
   @Post("generate")
   async generate(
     @CurrentActor() actor: Actor,
@@ -376,7 +535,7 @@ export class InsightsController {
       orderBy: { publishedAt: "desc" },
       take: 8,
     });
-    return this.ai.generate({
+    const snapshot = {
       scope,
       period: {
         start: start.toISOString().slice(0, 10),
@@ -418,7 +577,74 @@ export class InsightsController {
         title: item.title,
         summary: item.factSummary,
       })),
+    };
+    const status = await this.ai.status();
+    if (!status.generationEnabled) {
+      throw new ServiceUnavailableException(
+        "AI-CFO no está configurado o se encuentra desactivado",
+      );
+    }
+    const bundle = await this.ai.generate(snapshot);
+    const normalizedBundle = bundle as {
+      status?: string;
+      alerts?: Array<{ severity?: string }>;
+      opportunities?: Array<{
+        action?: string;
+        estimatedMonthlyImpact?: string;
+        confidence?: number;
+      }>;
+    };
+    const topOpportunity = normalizedBundle.opportunities?.[0];
+    const priority = normalizedBundle.alerts?.some(
+      (alert) => alert.severity === "critical",
+    )
+      ? "high"
+      : normalizedBundle.alerts?.some((alert) => alert.severity === "warning")
+        ? "medium"
+        : "low";
+    const insight = await this.prisma.insight.create({
+      data: {
+        householdId: actor.householdId,
+        ownerMemberId: scope === "private" ? actor.memberId : null,
+        scope,
+        periodStart: start,
+        periodEnd: now,
+        payload: {
+          bundle,
+          title:
+            normalizedBundle.status === "insufficient_data"
+              ? "Datos insuficientes para el análisis"
+              : "Análisis financiero del período",
+          estimatedImpact: topOpportunity?.estimatedMonthlyImpact ?? null,
+          priority,
+          scope,
+          period: snapshot.period,
+          confidence: topOpportunity?.confidence ?? null,
+          suggestedAction: topOpportunity?.action ?? null,
+          provider: status.provider,
+          model: status.model,
+          generatedAt: now.toISOString(),
+          evidence: snapshot.evidence,
+        } as Prisma.InputJsonValue,
+      },
     });
+    return insight;
+  }
+}
+
+@Controller("v1/ai-cfo")
+export class AiCfoController {
+  constructor(private readonly ai: AiCfoClient) {}
+
+  @Get("status")
+  status() {
+    return this.ai.status();
+  }
+
+  @Post("test")
+  async test(@CurrentActor() actor: Actor) {
+    if (actor.role !== "owner") throw new UnauthorizedException();
+    return this.ai.status();
   }
 }
 

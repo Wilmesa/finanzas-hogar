@@ -15,7 +15,23 @@ export const FrequencySchema = z.enum(["weekly", "biweekly", "monthly"]);
 
 const PositiveAmount = z
   .string()
-  .refine((value) => Number(value) > 0, "Debe ser mayor que cero");
+  .refine(
+    (value) =>
+      value.trim() !== "" &&
+      Number.isFinite(Number(value)) &&
+      Number(value) > 0,
+    "Debe ser mayor que cero",
+  );
+
+const NonNegativeAmount = z
+  .string()
+  .refine(
+    (value) =>
+      value.trim() !== "" &&
+      Number.isFinite(Number(value)) &&
+      Number(value) >= 0,
+    "No puede ser menor que cero",
+  );
 
 export const FundingPolicySchema = z.discriminatedUnion("kind", [
   z.object({
@@ -46,12 +62,21 @@ export const CreatePocketSchema = z.object({
     .trim()
     .length(3)
     .transform((value) => value.toUpperCase()),
-  currentAmount: z.string().default("0"),
+  currentAmount: NonNegativeAmount.default("0"),
   rolloverPolicy: z
     .enum(["none", "carry_balance", "carry_deficit"])
     .default("carry_balance"),
   policy: FundingPolicySchema,
 });
+
+export const UpdatePocketSchema = CreatePocketSchema.omit({
+  currentAmount: true,
+})
+  .partial()
+  .extend({
+    status: z.enum(["active", "paused", "completed", "archived"]).optional(),
+    version: z.number().int().positive(),
+  });
 
 export type FundingPolicy = z.infer<typeof FundingPolicySchema>;
 export type CreatePocket = z.infer<typeof CreatePocketSchema>;

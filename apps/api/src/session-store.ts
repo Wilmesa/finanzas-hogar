@@ -107,6 +107,22 @@ export class SessionStore {
     await this.redis.client.del(memberKey);
   }
 
+  async list(memberId: string): Promise<StoredSession[]> {
+    const memberKey = memberSessionsKey(memberId);
+    const keys = await this.redis.client.sMembers(memberKey);
+    if (!keys.length) return [];
+    const values = await this.redis.client.mGet(keys);
+    return values.flatMap((value) => {
+      if (!value) return [];
+      try {
+        const session = JSON.parse(value) as StoredSession;
+        return session.expiresAt > Date.now() ? [session] : [];
+      } catch {
+        return [];
+      }
+    });
+  }
+
   async consumeLoginAttempt(identifier: string, ip: string) {
     const maximum = boundedInteger(process.env.LOGIN_MAX_ATTEMPTS, 5, 3, 20);
     const windowSeconds = boundedInteger(

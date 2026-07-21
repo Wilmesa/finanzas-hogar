@@ -9,7 +9,7 @@ const password = "Example-Only-Password-123";
 const member = {
   id: "member-a",
   householdId: "household-one",
-  displayName: "Miembro A",
+  displayName: "Persona real",
   email: "a@example.invalid",
   role: "owner",
   createdAt: new Date(),
