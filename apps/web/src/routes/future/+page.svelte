@@ -1,0 +1,114 @@
+<script lang="ts">
+  import { currency } from "$lib/demo";
+
+  type Simulator = "goal" | "cdt" | "debt" | "investment" | "property";
+  let simulator = $state<Simulator>("goal");
+  let target = $state(80_000_000);
+  let currentSaved = $state(38_600_000);
+  let contribution = $state(1_800_000);
+  let principal = $state(10_000_000);
+  let annualRate = $state(10.5);
+  let days = $state(180);
+  let debtBalance = $state(25_000_000);
+  let debtRate = $state(18);
+  let debtPayment = $state(1_200_000);
+  let investmentInitial = $state(5_000_000);
+  let investmentMonthly = $state(500_000);
+  let investmentRate = $state(8);
+  let investmentYears = $state(5);
+  let propertyPrice = $state(420_000_000);
+  let downPaymentPercent = $state(30);
+  let mortgageRate = $state(12);
+  let mortgageYears = $state(15);
+
+  const goalMonths = $derived(
+    Math.max(0, Math.ceil((target - currentSaved) / Math.max(1, contribution))),
+  );
+  const cdtGrossInterest = $derived(
+    principal * (Math.pow(1 + annualRate / 100, days / 365) - 1),
+  );
+  const cdtWithholding = $derived(cdtGrossInterest * 0.04);
+  const cdtMaturity = $derived(principal + cdtGrossInterest - cdtWithholding);
+  const debtResult = $derived.by(() => {
+    let balance = debtBalance;
+    const monthlyRate = debtRate / 100 / 12;
+    let interest = 0;
+    let months = 0;
+    while (balance > 0.01 && months < 600) {
+      const monthInterest = balance * monthlyRate;
+      if (debtPayment <= monthInterest) return { months: Infinity, interest: Infinity };
+      balance -= Math.min(balance, debtPayment - monthInterest);
+      interest += monthInterest;
+      months += 1;
+    }
+    return { months, interest };
+  });
+  const investmentValue = $derived.by(() => {
+    const monthlyRate = Math.pow(1 + investmentRate / 100, 1 / 12) - 1;
+    let value = investmentInitial;
+    for (let month = 0; month < investmentYears * 12; month += 1) {
+      value = value * (1 + monthlyRate) + investmentMonthly;
+    }
+    return value;
+  });
+  const downPayment = $derived(propertyPrice * (downPaymentPercent / 100));
+  const propertySavingMonths = $derived(
+    Math.max(0, Math.ceil((downPayment - currentSaved) / Math.max(1, contribution))),
+  );
+  const mortgagePrincipal = $derived(propertyPrice - downPayment);
+  const mortgagePayment = $derived.by(() => {
+    const rate = mortgageRate / 100 / 12;
+    const periods = mortgageYears * 12;
+    return rate === 0
+      ? mortgagePrincipal / periods
+      : (mortgagePrincipal * rate * Math.pow(1 + rate, periods)) /
+          (Math.pow(1 + rate, periods) - 1);
+  });
+
+  const options: Array<{ id: Simulator; icon: string; title: string; text: string }> = [
+    { id: "goal", icon: "◎", title: "Meta", text: "Fecha según tu capacidad" },
+    { id: "cdt", icon: "▤", title: "CDT", text: "Vencimiento neto" },
+    { id: "debt", icon: "↘", title: "Deuda", text: "Tiempo e intereses" },
+    { id: "investment", icon: "⌁", title: "Inversión", text: "Escenario de crecimiento" },
+    { id: "property", icon: "⌂", title: "Vivienda", text: "Cuota inicial y crédito" },
+  ];
+</script>
+
+<div class="page">
+  <header class="page-header"><div><span class="eyebrow">Decisiones con perspectiva</span><h1>Simuladores financieros</h1><p>Simula escenarios sin alterar tus movimientos reales.</p></div><a class="secondary-link" href="/planning">← Volver al plan</a></header>
+  <section class="future-hero">
+    <div><span class="eyebrow">Patrimonio proyectado</span><strong>{currency(investmentValue)}</strong><p>Escenario ilustrativo a {investmentYears} años; no es una garantía.</p></div>
+    <div class="mini-chart" aria-label="Proyección creciente"><i style="height:25%"></i><i style="height:34%"></i><i style="height:46%"></i><i style="height:62%"></i><i style="height:84%"></i><i style="height:100%"></i></div>
+  </section>
+
+  <div class="simulator-picker" aria-label="Seleccionar simulador">
+    {#each options as option}
+      <button class:active={simulator === option.id} onclick={() => (simulator = option.id)}><span>{option.icon}</span><strong>{option.title}</strong><small>{option.text}</small></button>
+    {/each}
+  </div>
+
+  <section class="panel calculator-panel">
+    {#if simulator === "goal"}
+      <div class="calculator-copy"><span class="eyebrow">Meta por capacidad</span><h2>¿Cuándo llego?</h2><p>Indica cuánto necesitas y cuál es tu límite mensual.</p></div>
+      <div class="calculator-form"><label>Meta total<input type="number" bind:value={target} min="1" /></label><label>Ya tienes<input type="number" bind:value={currentSaved} min="0" /></label><label>Aporte mensual máximo<input type="number" bind:value={contribution} min="1" /></label></div>
+      <div class="result wide"><span>Tiempo estimado</span><strong>{goalMonths} meses</strong><small>Faltan {currency(Math.max(0, target - currentSaved))}; último aporte puede ser menor.</small></div>
+    {:else if simulator === "cdt"}
+      <div class="calculator-copy"><span class="eyebrow">Rendimiento fijo</span><h2>Proyección de CDT</h2><p>Tasa introducida por ti; confirma siempre la oferta de la entidad.</p></div>
+      <div class="calculator-form"><label>Capital<input type="number" bind:value={principal} min="1" /></label><label>Tasa efectiva anual (%)<input type="number" bind:value={annualRate} min="0" step="0.1" /></label><label>Duración en días<input type="number" bind:value={days} min="1" /></label></div>
+      <div class="result wide"><span>Valor neto al vencimiento</span><strong>{currency(cdtMaturity)}</strong><small>Interés bruto {currency(cdtGrossInterest)} · retención ilustrativa 4 %: {currency(cdtWithholding)}</small></div>
+    {:else if simulator === "debt"}
+      <div class="calculator-copy"><span class="eyebrow">Plan de salida</span><h2>Proyección de deuda</h2><p>La cuota debe superar los intereses del mes.</p></div>
+      <div class="calculator-form"><label>Saldo de la deuda<input type="number" bind:value={debtBalance} min="1" /></label><label>Tasa efectiva anual aproximada (%)<input type="number" bind:value={debtRate} min="0" step="0.1" /></label><label>Pago mensual total<input type="number" bind:value={debtPayment} min="1" /></label></div>
+      <div class="result wide"><span>Tiempo para terminar</span><strong>{Number.isFinite(debtResult.months) ? `${debtResult.months} meses` : "La cuota no alcanza"}</strong><small>{Number.isFinite(debtResult.interest) ? `Intereses aproximados: ${currency(debtResult.interest)}` : "Aumenta el pago por encima de los intereses mensuales."}</small></div>
+    {:else if simulator === "investment"}
+      <div class="calculator-copy"><span class="eyebrow">Escenario, no promesa</span><h2>Proyección de inversión</h2><p>Usa una rentabilidad prudente y compara contra inflación y comisiones.</p></div>
+      <div class="calculator-form"><label>Capital inicial<input type="number" bind:value={investmentInitial} min="0" /></label><label>Aporte mensual<input type="number" bind:value={investmentMonthly} min="0" /></label><label>Rentabilidad anual (%)<input type="number" bind:value={investmentRate} step="0.1" /></label><label>Horizonte en años<input type="number" bind:value={investmentYears} min="1" max="50" /></label></div>
+      <div class="result wide"><span>Valor nominal estimado</span><strong>{currency(investmentValue)}</strong><small>Aportes totales: {currency(investmentInitial + investmentMonthly * investmentYears * 12)}.</small></div>
+    {:else}
+      <div class="calculator-copy"><span class="eyebrow">Compra inmobiliaria</span><h2>Cuota inicial y crédito</h2><p>No incluye seguros, escrituración, impuestos ni variación de tasas.</p></div>
+      <div class="calculator-form"><label>Precio del inmueble<input type="number" bind:value={propertyPrice} min="1" /></label><label>Cuota inicial (%)<input type="number" bind:value={downPaymentPercent} min="0" max="100" /></label><label>Ahorro actual<input type="number" bind:value={currentSaved} min="0" /></label><label>Ahorro mensual<input type="number" bind:value={contribution} min="1" /></label><label>Tasa anual del crédito (%)<input type="number" bind:value={mortgageRate} min="0" step="0.1" /></label><label>Plazo del crédito (años)<input type="number" bind:value={mortgageYears} min="1" max="30" /></label></div>
+      <div class="result wide"><span>Cuota inicial en {propertySavingMonths} meses</span><strong>{currency(downPayment)}</strong><small>Crédito estimado {currency(mortgagePrincipal)} · cuota base aproximada {currency(mortgagePayment)} al mes.</small></div>
+    {/if}
+  </section>
+  <p class="educational-note">Todas las proyecciones son educativas y dependen de los supuestos introducidos. No constituyen asesoría ni garantía de rentabilidad.</p>
+</div>

@@ -1,0 +1,37 @@
+name: Calidad y construcción
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm pwa:icons && git diff --exit-code -- apps/web/static/icons
+      - run: pnpm verify
+      - run: test -f apps/web/build/client/service-worker.js
+
+  ai-cfo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -e "services/ai-cfo[test]"
+      - run: python -m pytest services/ai-cfo/tests -q

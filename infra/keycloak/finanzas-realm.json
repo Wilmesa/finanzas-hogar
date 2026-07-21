@@ -1,0 +1,77 @@
+{
+  "realm": "finanzas",
+  "enabled": true,
+  "displayName": "Nuestro Dinero",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "verifyEmail": true,
+  "bruteForceProtected": true,
+  "otpPolicyType": "totp",
+  "clients": [
+    {
+      "clientId": "finanzas-web",
+      "name": "Finanzas Web",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost/*", "https://localhost/*"],
+      "webOrigins": ["+"],
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "protocolMappers": [
+        {
+          "name": "finanzas-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "finanzas-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "household-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "household_id",
+            "claim.name": "household_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "household-role",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "household_role",
+            "claim.name": "household_role",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "finanzas-api",
+      "name": "Finanzas API",
+      "enabled": true,
+      "bearerOnly": true
+    }
+  ],
+  "roles": {
+    "realm": [
+      { "name": "household-owner", "description": "Administra el hogar" },
+      { "name": "household-member", "description": "Miembro del hogar" }
+    ]
+  }
+}

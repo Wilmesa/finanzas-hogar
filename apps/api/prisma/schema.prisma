@@ -1,0 +1,377 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PocketVisibility {
+  household
+  private
+}
+
+enum PocketPurpose {
+  daily_spend
+  sinking_fund
+  purchase
+  emergency
+  debt
+  investment
+  real_estate
+  custom
+}
+
+enum PocketStatus {
+  active
+  paused
+  completed
+  archived
+}
+
+enum PocketEventType {
+  allocated
+  released
+  spent
+  transferred
+  adjusted
+  goal_completed
+}
+
+enum LedgerScope {
+  household
+  private
+}
+
+model Household {
+  id           String        @id @default(uuid())
+  name         String
+  baseCurrency String        @default("COP")
+  timezone     String        @default("America/Bogota")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  members      Member[]
+  pockets      Pocket[]
+  transactions TransactionAttribution[]
+  checkIns     DailyCheckIn[]
+  insights     Insight[]
+  incomeSources IncomeSource[]
+  expectedIncomes ExpectedIncome[]
+  financialPlans FinancialPlan[]
+}
+
+model Member {
+  id          String       @id
+  householdId String
+  displayName String
+  email       String
+  role        String       @default("member")
+  createdAt   DateTime     @default(now())
+  household   Household    @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  pockets     Pocket[]     @relation("PocketOwner")
+  events      PocketEvent[]
+  transactions TransactionAttribution[] @relation("TransactionPayer")
+  checkIns    DailyCheckIn[]
+  incomeSources IncomeSource[] @relation("IncomeSourceOwner")
+  financialPlans FinancialPlan[] @relation("FinancialPlanOwner")
+  planRevisions PlanRevision[] @relation("PlanRevisionActor")
+  planAuditEvents PlanAuditEvent[] @relation("PlanAuditActor")
+
+  @@unique([householdId, email])
+  @@index([householdId])
+}
+
+model Pocket {
+  id             String           @id @default(uuid())
+  householdId    String
+  ownerMemberId  String
+  visibility     PocketVisibility @default(household)
+  purpose        PocketPurpose
+  name           String
+  currency       String
+  policy         Json
+  currentAmount  Decimal          @default(0) @db.Decimal(30, 8)
+  rolloverPolicy String           @default("carry_balance")
+  status         PocketStatus     @default(active)
+  version        Int              @default(1)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  household      Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  owner          Member           @relation("PocketOwner", fields: [ownerMemberId], references: [id])
+  events         PocketEvent[]
+  transactions   TransactionAttribution[]
+  allocationRules IncomeAllocationRule[]
+  fundingAllocations PlanFundingAllocation[]
+
+  @@index([householdId, visibility, status])
+  @@index([ownerMemberId, visibility])
+}
+
+model PocketEvent {
+  id               String          @id @default(uuid())
+  householdId      String
+  pocketId         String
+  actorMemberId    String
+  type             PocketEventType
+  amount           Decimal         @db.Decimal(30, 8)
+  currency         String
+  planningOnly     Boolean         @default(true)
+  fireflyTransactionId String?
+  idempotencyKey   String
+  metadata         Json?
+  createdAt        DateTime        @default(now())
+  pocket           Pocket          @relation(fields: [pocketId], references: [id], onDelete: Cascade)
+  actor            Member          @relation(fields: [actorMemberId], references: [id])
+
+  @@unique([householdId, idempotencyKey])
+  @@index([householdId, pocketId, createdAt])
+}
+
+model IncomeAllocationRule {
+  id            String   @id @default(uuid())
+  householdId   String
+  pocketId      String
+  priority      Int
+  mode          String
+  value         Decimal? @db.Decimal(30, 8)
+  cap           Decimal? @db.Decimal(30, 8)
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  pocket        Pocket   @relation(fields: [pocketId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, priority])
+}
+
+model TransactionAttribution {
+  id                    String      @id @default(uuid())
+  householdId           String
+  fireflyTransactionId  String
+  ledgerScope           LedgerScope
+  pocketId              String?
+  payerMemberId         String
+  category              String?
+  merchant              String?
+  amount                Decimal     @db.Decimal(30, 8)
+  currency              String
+  occurredAt            DateTime
+  idempotencyKey        String
+  createdAt             DateTime    @default(now())
+  household             Household   @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  pocket                Pocket?     @relation(fields: [pocketId], references: [id])
+  payer                  Member      @relation("TransactionPayer", fields: [payerMemberId], references: [id])
+  expectedIncome         ExpectedIncome?
+
+  @@unique([householdId, idempotencyKey])
+  @@unique([ledgerScope, fireflyTransactionId])
+  @@index([householdId, occurredAt])
+  @@index([pocketId, occurredAt])
+}
+
+model DailyCheckIn {
+  id          String   @id @default(uuid())
+  householdId String
+  memberId    String
+  localDate   DateTime @db.Date
+  kind        String
+  createdAt   DateTime @default(now())
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  member      Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, localDate])
+}
+
+model Insight {
+  id          String   @id @default(uuid())
+  householdId String
+  ownerMemberId String?
+  scope       LedgerScope
+  periodStart DateTime
+  periodEnd   DateTime
+  payload     Json
+  createdAt   DateTime @default(now())
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, scope, createdAt])
+}
+
+model NewsArticle {
+  id          String   @id @default(uuid())
+  source      String
+  sourceUrl   String   @unique
+  title       String
+  publishedAt DateTime
+  factSummary String
+  topics      String[]
+  fetchedAt   DateTime @default(now())
+
+  @@index([publishedAt])
+  @@index([source])
+}
+
+enum IncomeSourceKind {
+  salary
+  bonus_midyear
+  bonus_endyear
+  rent
+  investment_income
+  freelance
+  business
+  pension
+  windfall
+  other
+}
+
+enum IncomeRecurrence {
+  once
+  weekly
+  biweekly
+  monthly
+  quarterly
+  semiannual
+  annual
+  custom
+}
+
+enum ExpectedIncomeStatus {
+  planned
+  confirmed
+  received
+  cancelled
+}
+
+enum FinancialPlanStatus {
+  draft
+  agreed
+  active
+  completed
+  archived
+}
+
+model IncomeSource {
+  id            String            @id @default(uuid())
+  householdId   String
+  ownerMemberId String
+  visibility    PocketVisibility  @default(household)
+  name          String
+  kind          IncomeSourceKind
+  currency      String
+  recurrence    IncomeRecurrence  @default(once)
+  defaultAmount Decimal?          @db.Decimal(30, 8)
+  description   String?
+  active        Boolean           @default(true)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  household     Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  owner         Member            @relation("IncomeSourceOwner", fields: [ownerMemberId], references: [id])
+  expectedIncomes ExpectedIncome[]
+
+  @@index([householdId, visibility, active])
+  @@index([ownerMemberId, visibility])
+}
+
+model ExpectedIncome {
+  id                  String               @id @default(uuid())
+  householdId         String
+  sourceId            String
+  expectedDate        DateTime             @db.Date
+  expectedAmount      Decimal              @db.Decimal(30, 8)
+  actualAmount        Decimal?             @db.Decimal(30, 8)
+  currency            String
+  status              ExpectedIncomeStatus @default(planned)
+  probability         Decimal              @default(1) @db.Decimal(5, 4)
+  reason              String
+  notes               String?
+  receivedAt          DateTime?
+  actualTransactionAttributionId String?   @unique
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  household           Household            @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  source              IncomeSource         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  actualTransaction   TransactionAttribution? @relation(fields: [actualTransactionAttributionId], references: [id])
+  fundingAllocations  PlanFundingAllocation[]
+
+  @@index([householdId, expectedDate, status])
+  @@index([sourceId, expectedDate])
+  @@unique([sourceId, expectedDate])
+}
+
+model FinancialPlan {
+  id            String              @id @default(uuid())
+  householdId   String
+  ownerMemberId String
+  visibility    PocketVisibility    @default(household)
+  title         String
+  purpose       String
+  horizon       String
+  currency      String
+  status        FinancialPlanStatus @default(draft)
+  startDate     DateTime            @db.Date
+  targetDate    DateTime?           @db.Date
+  version       Int                 @default(1)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  household     Household           @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  owner         Member              @relation("FinancialPlanOwner", fields: [ownerMemberId], references: [id])
+  allocations   PlanFundingAllocation[]
+  revisions     PlanRevision[]
+  auditEvents   PlanAuditEvent[]
+
+  @@index([householdId, visibility, status])
+  @@index([ownerMemberId, visibility])
+}
+
+model PlanFundingAllocation {
+  id               String         @id @default(uuid())
+  householdId      String
+  planId           String
+  expectedIncomeId String
+  pocketId         String
+  mode             String
+  value            Decimal?       @db.Decimal(30, 8)
+  priority         Int
+  rationale        String
+  status           String         @default("planned")
+  appliedAt        DateTime?
+  pocketEventId    String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  plan             FinancialPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  expectedIncome   ExpectedIncome @relation(fields: [expectedIncomeId], references: [id], onDelete: Cascade)
+  pocket           Pocket         @relation(fields: [pocketId], references: [id])
+
+  @@index([householdId, expectedIncomeId, priority])
+  @@index([planId, priority])
+  @@index([pocketId, status])
+}
+
+model PlanRevision {
+  id                String        @id @default(uuid())
+  householdId       String
+  planId            String
+  version           Int
+  snapshot          Json
+  decisionNote      String
+  createdByMemberId String
+  createdAt         DateTime      @default(now())
+  plan              FinancialPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  actor             Member        @relation("PlanRevisionActor", fields: [createdByMemberId], references: [id])
+
+  @@unique([planId, version])
+  @@index([householdId, createdAt])
+}
+
+model PlanAuditEvent {
+  id            String        @id @default(uuid())
+  householdId   String
+  planId        String
+  actorMemberId String
+  action        String
+  details       Json?
+  createdAt     DateTime      @default(now())
+  plan          FinancialPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  actor         Member        @relation("PlanAuditActor", fields: [actorMemberId], references: [id])
+
+  @@index([householdId, planId, createdAt])
+}

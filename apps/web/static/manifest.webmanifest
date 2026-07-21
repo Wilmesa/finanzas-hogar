@@ -1,0 +1,49 @@
+{
+  "id": "/",
+  "name": "Nuestro Dinero",
+  "short_name": "Finanzas",
+  "description": "Finanzas personales y compartidas para parejas",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#f5f2ea",
+  "theme_color": "#12261f",
+  "lang": "es-CO",
+  "orientation": "any",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Registrar movimiento",
+      "short_name": "Movimiento",
+      "url": "/transactions?action=new",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Ver bolsillos",
+      "short_name": "Bolsillos",
+      "url": "/pockets",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

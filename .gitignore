@@ -1,0 +1,17 @@
+node_modules/
+.pnpm-store/
+.svelte-kit/
+build/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+backups/
+.DS_Store
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+apps/api/prisma/dev.db

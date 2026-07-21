@@ -1,0 +1,10 @@
+.git
+node_modules
+**/node_modules
+**/dist
+**/.svelte-kit
+**/__pycache__
+.venv
+.env
+coverage
+

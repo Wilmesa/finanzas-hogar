@@ -1,0 +1,95 @@
+{
+  "name": "Recordatorio financiero diario",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 20 * * *" }
+          ]
+        }
+      },
+      "id": "schedule-daily",
+      "name": "20:00 America/Bogota",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.FINANZAS_API_URL}}/v1/automation/reminders/eligible",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-automation-token",
+              "value": "={{$env.N8N_AUTOMATION_TOKEN}}"
+            }
+          ]
+        },
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      },
+      "id": "eligible-members",
+      "name": "Consultar elegibilidad",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": { "fieldToSplitOut": "eligible", "options": {} },
+      "id": "one-per-member",
+      "name": "Un miembro por item",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.FINANZAS_API_URL}}/v1/automation/reminders/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-automation-token",
+              "value": "={{$env.N8N_AUTOMATION_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ memberId: $json.id, channel: 'telegram' }) }}",
+        "options": {}
+      },
+      "id": "send-reminder",
+      "name": "Solicitar recordatorio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [980, 300]
+    }
+  ],
+  "connections": {
+    "20:00 America/Bogota": {
+      "main": [
+        [{ "node": "Consultar elegibilidad", "type": "main", "index": 0 }]
+      ]
+    },
+    "Consultar elegibilidad": {
+      "main": [[{ "node": "Un miembro por item", "type": "main", "index": 0 }]]
+    },
+    "Un miembro por item": {
+      "main": [
+        [{ "node": "Solicitar recordatorio", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Bogota",
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none"
+  },
+  "active": false,
+  "versionId": "7f01097d-bddf-4f0f-9aae-f5b83a9a3418"
+}

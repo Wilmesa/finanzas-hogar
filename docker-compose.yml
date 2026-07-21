@@ -1,0 +1,184 @@
+name: finanzas-pareja
+
+x-app-env: &app-env
+  TZ: America/Bogota
+  DATABASE_URL: postgresql://finanzas:${POSTGRES_PASSWORD:-change-me}@postgres:5432/finanzas
+  REDIS_URL: redis://redis:6379
+  FIREFLY_BASE_URL: http://firefly:8080
+  AI_CFO_URL: http://ai-cfo:8000
+  AI_CFO_INTERNAL_TOKEN: ${AI_CFO_INTERNAL_TOKEN:-local-ai-token-change-me}
+  N8N_AUTOMATION_TOKEN: ${N8N_AUTOMATION_TOKEN:-local-n8n-token-change-me}
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, api]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      PUBLIC_DATA_MODE: server
+      PUBLIC_API_BASE_URL: /api
+      PUBLIC_KEYCLOAK_URL: /auth
+      PUBLIC_KEYCLOAK_REALM: finanzas
+      PUBLIC_KEYCLOAK_CLIENT_ID: finanzas-web
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    command:
+      [
+        "sh",
+        "-c",
+        "pnpm --filter @finanzas/api exec prisma migrate deploy && pnpm --filter @finanzas/api start",
+      ]
+    environment:
+      <<: *app-env
+      NODE_ENV: production
+      APP_BASE_URL: https://${APP_DOMAIN:-localhost}
+      KEYCLOAK_ISSUER: https://${APP_DOMAIN:-localhost}/auth/realms/finanzas
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/auth/realms/finanzas/protocol/openid-connect/certs
+      KEYCLOAK_AUDIENCE: finanzas-api
+      DEV_AUTH_ENABLED: "false"
+      FIREFLY_HOUSEHOLD_TOKEN: ${FIREFLY_HOUSEHOLD_TOKEN:-}
+      HOUSEHOLD_ID: ${HOUSEHOLD_ID:-household-demo}
+      HOUSEHOLD_NAME: ${HOUSEHOLD_NAME:-Nuestro hogar}
+      MEMBER_A_ID: ${MEMBER_A_ID:-member-a}
+      MEMBER_A_NAME: ${MEMBER_A_NAME:-Ana}
+      MEMBER_A_EMAIL: ${MEMBER_A_EMAIL:-ana@example.local}
+      MEMBER_B_ID: ${MEMBER_B_ID:-member-b}
+      MEMBER_B_NAME: ${MEMBER_B_NAME:-Leo}
+      MEMBER_B_EMAIL: ${MEMBER_B_EMAIL:-leo@example.local}
+      FIREFLY_PRIVATE_TOKEN_MEMBER_A: ${FIREFLY_PRIVATE_TOKEN_MEMBER_A:-}
+      FIREFLY_PRIVATE_TOKEN_MEMBER_B: ${FIREFLY_PRIVATE_TOKEN_MEMBER_B:-}
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID_MEMBER_A: ${TELEGRAM_CHAT_ID_MEMBER_A:-}
+      TELEGRAM_CHAT_ID_MEMBER_B: ${TELEGRAM_CHAT_ID_MEMBER_B:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ai-cfo:
+    build: ./services/ai-cfo
+    restart: unless-stopped
+    environment:
+      TZ: America/Bogota
+      AI_CFO_INTERNAL_TOKEN: ${AI_CFO_INTERNAL_TOKEN:-local-ai-token-change-me}
+      AI_PROVIDER: ${AI_PROVIDER:-disabled}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-terra}
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finanzas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: finanzas
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/10-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finanzas"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis_data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  firefly:
+    image: fireflyiii/core:version-6.6.3
+    restart: unless-stopped
+    ports: ["127.0.0.1:${FIREFLY_LOCAL_PORT:-8081}:8080"]
+    environment:
+      APP_ENV: production
+      APP_KEY: ${FIREFLY_APP_KEY:-SomeRandomStringOf32CharsExactly!}
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: firefly
+      DB_USERNAME: finanzas
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      TZ: America/Bogota
+      TRUSTED_PROXIES: "**"
+    volumes: ["firefly_upload:/var/www/html/storage/upload"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.6.3
+    restart: unless-stopped
+    command:
+      [
+        "start",
+        "--import-realm",
+        "--proxy-headers",
+        "xforwarded",
+        "--http-enabled",
+        "true",
+        "--http-relative-path",
+        "/auth",
+      ]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: finanzas
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-me-now}
+      KC_HOSTNAME: https://${APP_DOMAIN:-localhost}/auth
+      KC_HOSTNAME_STRICT: "true"
+    volumes:
+      - ./infra/keycloak/finanzas-realm.json:/opt/keycloak/data/import/finanzas-realm.json:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  n8n:
+    image: n8nio/n8n:2.29.11
+    restart: unless-stopped
+    ports: ["127.0.0.1:${N8N_LOCAL_PORT:-5678}:5678"]
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: finanzas
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      GENERIC_TIMEZONE: America/Bogota
+      TZ: America/Bogota
+      FINANZAS_API_URL: http://api:3000
+      N8N_AUTOMATION_TOKEN: ${N8N_AUTOMATION_TOKEN:-local-n8n-token-change-me}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change-this-before-production}
+    volumes: ["n8n_data:/home/node/.n8n"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:
+  redis_data:
+  firefly_upload:
+  n8n_data:

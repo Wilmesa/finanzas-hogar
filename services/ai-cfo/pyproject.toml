@@ -1,0 +1,19 @@
+[project]
+name = "finanzas-ai-cfo"
+version = "0.1.0"
+description = "Narrador financiero privado con salidas estructuradas"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "pydantic>=2.11,<3",
+  "uvicorn[standard]>=0.35,<1"
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.4,<9"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+

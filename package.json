@@ -1,0 +1,28 @@
+{
+  "name": "finanzas-en-pareja",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm --filter @finanzas/domain build && pnpm -r check",
+    "dev": "pnpm --parallel --filter @finanzas/api --filter @finanzas/web dev",
+    "dev:local": "pnpm --filter @finanzas/web dev --host 127.0.0.1",
+    "format": "prettier --check --ignore-unknown .",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "verify": "pnpm check && pnpm test && pnpm build && pnpm format",
+    "db:generate": "pnpm --filter @finanzas/api prisma:generate",
+    "db:migrate": "pnpm --filter @finanzas/api prisma:migrate",
+    "db:seed": "pnpm --filter @finanzas/api prisma:seed",
+    "pwa:icons": "node scripts/generate-pwa-icons.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2"
+  }
+}

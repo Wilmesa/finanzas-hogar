@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Nuestro Dinero">
+  <rect width="512" height="512" rx="112" fill="#12261f"/>
+  <circle cx="374" cy="138" r="76" fill="#c7e86d"/>
+  <path d="M132 358V154l248 204V154" fill="none" stroke="#f5f2ea" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
