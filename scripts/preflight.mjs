@@ -45,6 +45,14 @@ if (localMode) {
   const target = process.env.DEPLOY_TARGET || env.DEPLOY_TARGET;
   if (!["private", "public"].includes(target))
     errors.push("DEPLOY_TARGET debe ser private o public");
+  const auth =
+    process.env.AUTH_MODE ||
+    env.AUTH_MODE ||
+    (target === "public" ? "keycloak" : "local");
+  if (!["local", "keycloak"].includes(auth))
+    errors.push("AUTH_MODE debe ser local o keycloak");
+  if ((process.env.PUBLIC_AUTH_MODE || env.PUBLIC_AUTH_MODE || auth) !== auth)
+    errors.push("PUBLIC_AUTH_MODE debe coincidir con AUTH_MODE");
   if (!/^[a-z0-9][a-z0-9_-]{2,62}$/i.test(env.COMPOSE_PROJECT_NAME ?? ""))
     errors.push("COMPOSE_PROJECT_NAME no es válido");
 
@@ -64,6 +72,7 @@ if (localMode) {
     errors.push("DEV_AUTH_ENABLED debe ser false en despliegues integrados");
 
   for (const key of SECRET_KEYS) {
+    if (key === "KEYCLOAK_ADMIN_PASSWORD" && auth !== "keycloak") continue;
     const value = env[key] ?? "";
     if (isUnsafeSecret(value)) errors.push(`${key} no es un secreto válido`);
   }
@@ -91,11 +100,11 @@ if (localMode) {
   }
 
   const realmPath = resolve(root, "runtime/keycloak/finanzas-realm.json");
-  if (!existsSync(realmPath)) {
+  if (auth === "keycloak" && !existsSync(realmPath)) {
     errors.push(
       "Falta el realm runtime; ejecuta node scripts/configure-domain.mjs",
     );
-  } else if (origin) {
+  } else if (auth === "keycloak" && origin) {
     const realm = JSON.parse(readFileSync(realmPath, "utf8"));
     const client = realm.clients?.find(
       (item) => item.clientId === "finanzas-web",
@@ -129,6 +138,10 @@ if (localMode) {
         try {
           const config = JSON.parse(rendered.stdout);
           const services = config.services ?? {};
+          if (auth === "local" && services.keycloak)
+            errors.push("AUTH_MODE=local no debe incluir Keycloak");
+          if (auth === "keycloak" && !services.keycloak)
+            errors.push("AUTH_MODE=keycloak debe incluir Keycloak");
           if (target === "private") {
             const gatewayPorts = services.gateway?.ports ?? [];
             if (

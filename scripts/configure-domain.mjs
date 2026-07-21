@@ -5,13 +5,26 @@ import { readEnv, renderRealm } from "./lib/config.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const env = readEnv(resolve(root, ".env"));
+const selectedAuth =
+  process.env.AUTH_MODE ??
+  env.AUTH_MODE ??
+  ((process.env.DEPLOY_TARGET ?? env.DEPLOY_TARGET) === "public"
+    ? "keycloak"
+    : "local");
+if (selectedAuth !== "keycloak") {
+  console.log("AUTH_MODE=local: no se genera configuración de Keycloak.");
+  process.exit(0);
+}
 const templatePath = resolve(
   root,
   "infra/keycloak/finanzas-realm.template.json",
 );
 const outputPath = resolve(root, "runtime/keycloak/finanzas-realm.json");
 const template = JSON.parse(readFileSync(templatePath, "utf8"));
-const realm = renderRealm(template, env.APP_ORIGIN ?? "");
+const realm = renderRealm(
+  template,
+  process.env.APP_ORIGIN ?? env.APP_ORIGIN ?? "",
+);
 const next = `${JSON.stringify(realm, null, 2)}\n`;
 
 mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });

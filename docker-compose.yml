@@ -26,6 +26,7 @@ services:
       dockerfile: apps/web/Dockerfile
     environment:
       PUBLIC_DATA_MODE: server
+      PUBLIC_AUTH_MODE: ${PUBLIC_AUTH_MODE:-local}
       PUBLIC_API_BASE_URL: /api
       PUBLIC_KEYCLOAK_URL: /auth
       PUBLIC_KEYCLOAK_REALM: finanzas
@@ -46,6 +47,10 @@ services:
     environment:
       <<: *app-env
       NODE_ENV: production
+      AUTH_MODE: ${AUTH_MODE:-local}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-5}
+      LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-900}
       APP_BASE_URL: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}
       KEYCLOAK_ISSUER: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}/auth/realms/finanzas
       KEYCLOAK_JWKS_URL: http://keycloak:8080/auth/realms/finanzas/protocol/openid-connect/certs
@@ -57,9 +62,11 @@ services:
       MEMBER_A_ID: ${MEMBER_A_ID:-member-a}
       MEMBER_A_NAME: ${MEMBER_A_NAME:-Miembro A}
       MEMBER_A_EMAIL: ${MEMBER_A_EMAIL:-member-a@example.invalid}
+      MEMBER_A_USERNAME: ${MEMBER_A_USERNAME:-member-a}
       MEMBER_B_ID: ${MEMBER_B_ID:-member-b}
       MEMBER_B_NAME: ${MEMBER_B_NAME:-Miembro B}
       MEMBER_B_EMAIL: ${MEMBER_B_EMAIL:-member-b@example.invalid}
+      MEMBER_B_USERNAME: ${MEMBER_B_USERNAME:-member-b}
       FIREFLY_PRIVATE_TOKEN_MEMBER_A: ${FIREFLY_PRIVATE_TOKEN_MEMBER_A:-}
       FIREFLY_PRIVATE_TOKEN_MEMBER_B: ${FIREFLY_PRIVATE_TOKEN_MEMBER_B:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
@@ -159,49 +166,6 @@ services:
       timeout: 8s
       retries: 15
       start_period: 60s
-
-  keycloak:
-    <<: *service-defaults
-    image: quay.io/keycloak/keycloak:26.6.3
-    command:
-      [
-        "start",
-        "--import-realm",
-        "--proxy-headers",
-        "xforwarded",
-        "--http-enabled",
-        "true",
-        "--http-relative-path",
-        "/auth",
-      ]
-    environment:
-      APP_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}
-      KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
-      KC_DB_USERNAME: finanzas
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD es obligatorio}
-      KC_HOSTNAME: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}/auth
-      KC_HOSTNAME_STRICT: "true"
-      KC_HEALTH_ENABLED: "true"
-      KC_METRICS_ENABLED: "true"
-      KC_HTTP_MANAGEMENT_SCHEME: http
-    volumes:
-      - ./runtime/keycloak/finanzas-realm.json:/opt/keycloak/data/import/finanzas-realm.json:ro
-    depends_on:
-      postgres: { condition: service_healthy }
-    networks: [edge, backend]
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "{ printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0; grep -q 'HTTP/1.0 200'; } 0<>/dev/tcp/127.0.0.1/9000",
-        ]
-      interval: 15s
-      timeout: 5s
-      retries: 24
-      start_period: 45s
 
   n8n:
     <<: *service-defaults
