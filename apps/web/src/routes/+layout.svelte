@@ -2,7 +2,8 @@
   import "../app.css";
   import Nav from "$lib/Nav.svelte";
   import { hydrateFinanceData } from "$lib/finance-store";
-  import { isAuthenticated, isServerMode, login } from "$lib/auth";
+  import { authMode, isAuthenticated, isServerMode, login } from "$lib/auth";
+  import LocalLogin from "$lib/LocalLogin.svelte";
   import { page } from "$app/state";
   import { onMount } from "svelte";
   let { children } = $props();
@@ -25,6 +26,11 @@
       loading = false;
     }
   });
+
+  async function localLoginSucceeded() {
+    await hydrateFinanceData();
+    authenticated = true;
+  }
 </script>
 
 <svelte:head><title>Nuestro Dinero</title></svelte:head>
@@ -38,7 +44,11 @@
     <span class="eyebrow">Finanzas en pareja</span>
     <h1>Un lugar tranquilo para su dinero</h1>
     <p>Ingresa de forma segura para consultar el hogar y tus bolsillos privados.</p>
-    <button class="primary-button" onclick={login}>Ingresar</button>
+    {#if authMode() === "local"}
+      <LocalLogin onSuccess={localLoginSucceeded} />
+    {:else}
+      <button class="primary-button" onclick={login}>Ingresar</button>
+    {/if}
   </div>
 {:else}
   <div class="app-shell">

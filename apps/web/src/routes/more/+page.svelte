@@ -1,12 +1,15 @@
 <script lang="ts">
   import { exportFinanceData, importFinanceData, resetLocalData } from "$lib/finance-store";
-  import { isServerMode, logout } from "$lib/auth";
+  import { authMode, changeLocalPassword, isServerMode, logout } from "$lib/auth";
   import { apiRequest } from "$lib/api";
   import PwaStatus from "$lib/PwaStatus.svelte";
   import NotificationSettings from "$lib/NotificationSettings.svelte";
   import { onMount } from "svelte";
   let message = $state("");
   let error = $state("");
+  let currentPassword = $state("");
+  let newPassword = $state("");
+  let confirmPassword = $state("");
   let news = $state([
     {
       source: "Banco de la República",
@@ -57,12 +60,41 @@
     resetLocalData();
     message = "Datos locales restaurados.";
   }
+
+  async function changePassword(event: SubmitEvent) {
+    event.preventDefault();
+    error = "";
+    message = "";
+    if (newPassword !== confirmPassword) {
+      error = "Las contraseñas nuevas no coinciden.";
+      return;
+    }
+    try {
+      await changeLocalPassword(currentPassword, newPassword);
+      currentPassword = newPassword = confirmPassword = "";
+      alert("Contraseña actualizada. Debes iniciar sesión nuevamente.");
+      location.assign("/");
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible cambiar la contraseña";
+    }
+  }
 </script>
 
 <div class="page">
   <header class="page-header"><div><span class="eyebrow">Contexto y control</span><h1>Más</h1><p>Noticias, automatizaciones y configuración del hogar.</p></div></header>
   <PwaStatus />
   <NotificationSettings />
+  {#if isServerMode() && authMode() === "local"}
+    <details class="panel-card">
+      <summary><strong>Cambiar mi contraseña</strong></summary>
+      <form class="auth-form" onsubmit={changePassword}>
+        <label>Contraseña actual<input type="password" autocomplete="current-password" bind:value={currentPassword} required /></label>
+        <label>Nueva contraseña<input type="password" autocomplete="new-password" minlength="12" maxlength="128" bind:value={newPassword} required /></label>
+        <label>Repetir contraseña<input type="password" autocomplete="new-password" minlength="12" maxlength="128" bind:value={confirmPassword} required /></label>
+        <button class="primary-button" type="submit">Cambiar y cerrar sesiones</button>
+      </form>
+    </details>
+  {/if}
   <section class="news-layout">
     <article class="featured-news"><span class="eyebrow">{news[0]?.source} · {new Date(news[0]?.publishedAt ?? Date.now()).toLocaleDateString("es-CO")}</span><h2>{news[0]?.title}</h2><p><strong>Hecho publicado:</strong> {news[0]?.factSummary}</p><a href={news[0]?.sourceUrl} target="_blank" rel="noreferrer">Abrir fuente original ↗</a></article>
     <div class="settings-list">
@@ -71,7 +103,7 @@
       <button onclick={downloadExport}><span class="settings-icon">⇩</span><span><strong>Exportar y respaldar</strong><small>Descargar un JSON portable</small></span><b>›</b></button>
       <label class="import-action"><span class="settings-icon">⇧</span><span><strong>Importar datos</strong><small>Restaurar una exportación JSON</small></span><b>›</b><input class="sr-only" type="file" accept="application/json" onchange={importFile} /></label>
       {#if !isServerMode()}<button onclick={reset}><span class="settings-icon">↺</span><span><strong>Restaurar demostración</strong><small>Elimina cambios locales</small></span><b>›</b></button>{/if}
-      {#if isServerMode()}<button onclick={logout}><span class="settings-icon">↪</span><span><strong>Cerrar sesión</strong><small>Salir de este dispositivo</small></span><b>›</b></button>{/if}
+      {#if isServerMode()}<button onclick={() => logout()}><span class="settings-icon">↪</span><span><strong>Cerrar sesión</strong><small>Salir de este dispositivo</small></span><b>›</b></button>{/if}
     </div>
   </section>
   {#if message}<p class="success-message" role="status">{message}</p>{/if}

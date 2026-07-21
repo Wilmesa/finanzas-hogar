@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { Logger, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import fastifyCookie from "@fastify/cookie";
 import {
   FastifyAdapter,
   NestFastifyApplication,
@@ -10,8 +11,9 @@ import { AppModule } from "./app.module.js";
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ logger: true }),
+    new FastifyAdapter({ logger: true, trustProxy: true }),
   );
+  await app.register(fastifyCookie);
   app.enableCors({
     origin:
       process.env.APP_ORIGIN ??
