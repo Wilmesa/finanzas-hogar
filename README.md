@@ -1,12 +1,12 @@
-# Nuestro Dinero
+# FinNest
 
 Aplicación self-hosted de finanzas personales y de pareja. Firefly III conserva el libro contable; el Pocket Engine añade propósitos, metas, privacidad y proyecciones sin inventar movimientos bancarios.
 
 ## Estado de esta entrega
 
-El repositorio contiene una **beta funcional y desplegable** de la Fase 1. `PUBLIC_DATA_MODE=local` permite una demostración sin infraestructura y `server` usa PostgreSQL/Firefly. La autenticación integrada admite `AUTH_MODE=local` (predeterminado privado) o `keycloak` (opcional/público):
+El repositorio contiene una **beta experimental funcional y desplegable** de FinNest. `PUBLIC_DATA_MODE=local` permite una demostración sin infraestructura y `server` usa identidades, PostgreSQL y Firefly reales. La autenticación integrada admite `AUTH_MODE=local` (predeterminado privado) o `keycloak` (opcional/público):
 
-- PWA responsive e instalable en SvelteKit con las vistas Hoy, Bolsillos, Movimientos, Futuro y Más.
+- PWA responsive e instalable en SvelteKit con Hoy, Futuro, Patrimonio, Copiloto y Movimientos; Cuentas, Bolsillos, Hogar y Configuración son secciones secundarias.
 - Service worker con caché de interfaz y navegación visitada; API financiera y autenticación siempre quedan fuera de caché.
 - API NestJS/Fastify con identidad normalizada, sesiones locales opacas en Redis u OIDC/PKCE opcional.
 - PostgreSQL/Prisma con hogares, miembros, bolsillos, eventos, reglas, atribuciones, check-ins e insights.
@@ -15,8 +15,9 @@ El repositorio contiene una **beta funcional y desplegable** de la Fase 1. `PUBL
 - Distribución priorizada de ingresos.
 - Proyecciones determinísticas de ahorro, CDT, inversión, deuda e inmuebles.
 - Plan financiero trazable: salarios, primas, alquileres u otras fuentes, calendario de ingresos y acuerdos versionados hacia bolsillos.
-- Adaptador Firefly por libro compartido o privado.
-- Servicio AI-CFO FastAPI con proveedor OpenAI opcional, JSON Schema y validación de evidencia.
+- Adaptador Firefly por libro compartido o privado, administración de cuentas desde FinNest y estados independientes por libro.
+- Servicio AI-CFO FastAPI con proveedores OpenAI, Gemini o determinístico de pruebas, salida estructurada y validación de evidencia.
+- Perfiles reales, pagadores del hogar, onboarding diagnosticable y temas claro/oscuro/sistema.
 - Noticias persistentes de BanRep y Alpha Vantage opcional, normalizadas y deduplicadas.
 - Web Push nativo con horarios múltiples configurables por miembro y registro idempotente de entregas; n8n es un disparador opcional.
 - Docker Compose por target: privado Tailscale, público opcional y n8n integrado bajo perfil explícito.
@@ -51,7 +52,7 @@ La API queda en `http://localhost:3000` y acepta los encabezados de desarrollo:
 ```text
 x-household-id: household-demo
 x-member-id: member-a
-x-member-name: Ana
+x-member-name: Persona local
 ```
 
 ## Despliegue privado recomendado
@@ -119,17 +120,53 @@ python3 -m pytest services/ai-cfo/tests -q
 - `GET /v1/pockets`: devuelve compartidos más privados propios.
 - `GET /v1/pockets/:id/projection`: calcula el progreso según su política.
 - `POST /v1/pockets/:id/allocate`: registra un evento virtual idempotente.
-- `GET /v1/accounts`: devuelve las cuentas Firefly compartidas y las privadas propias con su alcance.
+- `GET/POST/PATCH/DELETE /v1/accounts`: administra cuentas Firefly por alcance sin exponer PAT al cliente.
+- `GET/PATCH /v1/household` y `PATCH /v1/profile`: hogar, miembros e identidad visible.
+- `GET /v1/onboarding/status`: diagnóstico seguro de la configuración inicial.
 - `GET/POST/PATCH /v1/planning/*`: fuentes, ingresos esperados, planes, asignaciones e historia de decisiones.
 - `POST /v1/transactions`: registra en el libro Firefly correcto y guarda su atribución.
 - `POST /v1/projections/*`: ahorro, CDT, deuda, inversión e inmuebles sin modificar Firefly.
-- `POST /v1/insights/generate`: construye un snapshot permitido y lo envía al AI-CFO.
+- `GET/POST /v1/insights`: consulta o genera un snapshot permitido, valida y persiste el análisis.
+- `GET /v1/ai-cfo/status`: proveedor, modelo y disponibilidad, nunca la API key.
 - `GET/PUT /v1/reminders/preferences`: consulta y configura horarios individuales.
 - `GET /v1/push/public-key` y `POST/DELETE /v1/push/subscriptions`: registra cada dispositivo PWA.
 - `POST /v1/automation/reminders/process`: disparador opcional autenticado para n8n.
 - `POST /v1/auth/login`, `GET /v1/auth/me`, `POST /v1/auth/logout` y `POST /v1/auth/change-password`: sesión local segura.
 
 Los comandos monetarios exigen `Idempotency-Key`.
+
+## Configurar AI-CFO
+
+La IA está desactivada por defecto. Seleccione un único proveedor en el `.env` del servidor:
+
+```dotenv
+AI_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5.6-terra
+```
+
+o:
+
+```dotenv
+AI_PROVIDER=gemini
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+Para NVIDIA NIM, Groq, OpenRouter, Together, LiteLLM u otro endpoint compatible con Chat Completions:
+
+```dotenv
+AI_PROVIDER=openai_compatible
+AI_COMPATIBLE_PROVIDER_NAME=Mi proveedor
+AI_COMPATIBLE_BASE_URL=https://api.proveedor.example/v1
+AI_COMPATIBLE_API_KEY=...
+AI_COMPATIBLE_MODEL=modelo-elegido
+AI_COMPATIBLE_STRUCTURED_MODE=json_schema
+```
+
+Cambie el modo a `json_object` o `prompt` si el proveedor no implementa JSON Schema estricto; Pydantic y el verificador de evidencia siguen siendo obligatorios. Para una API propietaria use un gateway compatible como LiteLLM o añada un adaptador que implemente `InsightProvider`. HTTP se bloquea por defecto y solo puede habilitarse deliberadamente para un gateway local controlado.
+
+Use `deterministic` únicamente para pruebas. La PWA recibe proveedor, modelo y estado, pero nunca la clave. Todos los proveedores pasan por Pydantic y el verificador de evidencia.
 
 ## Límites conocidos de la beta
 
@@ -138,8 +175,8 @@ Los comandos monetarios exigen `Idempotency-Key`.
 - La inspección visual automatizada y el comportamiento offline se registran en `BITACORA.md`; el stack completo aún debe probarse en una máquina con Docker.
 - Web Push requiere instalar la PWA, conceder permiso en cada dispositivo y completar una prueba real de entrega en el servidor. En iOS se necesita una PWA añadida a la pantalla de inicio.
 - La ingesta BanRep/Alpha Vantage está implementada, pero debe verificarse con red real y ajustar el parser si BanRep modifica su feed.
-- La operación privada financiada desde el libro común requiere un outbox/saga para compensar una caída entre ambas escrituras Firefly.
-- Falta imponer RLS con un rol PostgreSQL de runtime separado y completar pruebas E2E contra Firefly con datos ficticios.
+- La operación privada financiada desde el libro común deja atribuciones `pending/failed/synchronized` y un asiento redactado; aún se recomienda un worker outbox dedicado antes de escala comercial.
+- Falta imponer RLS con un rol PostgreSQL de runtime separado y ampliar la prueba E2E de cuentas contra un Firefly efímero con PAT automatizado.
 - Redis/BullMQ, OpenTelemetry y los dashboards de observabilidad están previstos, pero no se activan todavía en código.
 
 Consulte [la bitácora](BITACORA.md), [el módulo de planificación](docs/PLANNING.md), [la migración](docs/MIGRATION.md), [la arquitectura](docs/ARCHITECTURE.md) y [la seguridad](docs/SECURITY.md) antes de cargar información financiera real.

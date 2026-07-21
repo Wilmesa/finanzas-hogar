@@ -1,4 +1,4 @@
-# Bitácora técnica y de operación — Nuestro Dinero
+# Bitácora técnica y de operación — FinNest
 
 Este documento es la fuente de verdad operativa del proyecto. Registra qué se construyó, cómo se verificó, qué falló, qué queda pendiente y cómo trasladar el sistema a un servidor nuevo. Debe actualizarse con cada cambio de arquitectura, despliegue o incidente.
 
@@ -347,3 +347,49 @@ Esta lista debe reducirse antes de declarar versión estable:
 - Pruebas unitarias de API/PWA y suite permanente de regresión visual móvil/escritorio.
 - Instaladores móviles Capacitor y firma de tiendas.
 - Open Banking y lectura de notificaciones, reservados para Fase 2.
+
+## 2026-07-21 — Estabilización funcional y rediseño FinNest
+
+### Diagnóstico confirmado
+
+- El 500 al crear bolsillos provenía de `CreatePocketSchema.parse`: el `ZodError` escapaba de NestJS sin traducirse a HTTP 400. El formulario periódico enviaba una política válida, pero cualquier valor vacío/no numérico terminaba como error interno genérico.
+- Los nombres ficticios provenían de `finance-store.ts`, `demo.ts`, `Nav.svelte` y los selectores de pagador. En modo servidor la hidratación sustituía colecciones, pero no la configuración `memberName`, por lo que el usuario autenticado seguía viendo una identidad demo.
+- `GET /v1/accounts` usaba `Promise.all`; la ausencia de un PAT privado rechazaba también las cuentas compartidas. Solo existía lectura y no había interfaz de administración.
+- La portada contenía un insight estático sin consulta a AI-CFO. La generación existente no persistía su respuesta ni mostraba proveedor, período o evidencia.
+- La transacción se creaba primero en Firefly y solo después en PostgreSQL; una caída intermedia podía dejar un movimiento real sin atribución local.
+
+### Implementado y funcionando en pruebas automatizadas
+
+- Branding visible FinNest, identidad de nido, manifiesto, service worker e iconos PWA reproducibles 192/512/maskable.
+- Tema claro, oscuro y sistema con tokens CSS propios; se retiró el plugin Tailwind del build para evitar dos sistemas visuales simultáneos.
+- Navegación principal Hoy/Futuro/Patrimonio/Copiloto/Movimientos y accesos secundarios a Bolsillos, Cuentas y Configuración.
+- Perfiles y hogar reales: lectura de miembros, edición del nombre propio/color, edición del hogar solo por owner y cambio de contraseña local.
+- Onboarding diagnosticable basado en datos existentes; no guarda PAT ni claves en el cliente.
+- Cuentas Firefly: listar, crear, editar, archivar y probar por alcance. La respuesta usa `allSettled`, de modo que un libro ausente no bloquea el otro.
+- Bolsillos: validación amigable 400, creación de las ocho finalidades con las tres políticas, aporte, pausa/reanudación, archivo, privacidad y versión optimista.
+- Pagador construido desde los miembros reales. Un gasto privado solo puede atribuirse al actor; uno compartido admite miembros reales del hogar.
+- Estado de sincronización `pending/synchronized/failed`, error sanitizado y clave idempotente. Las asignaciones comunes privadas dejan un movimiento compartido redactado y detalle privado.
+- Copiloto real: proveedores `openai`, `gemini`, `openai_compatible`, `deterministic` y `disabled`; el genérico conecta NVIDIA NIM, Groq, OpenRouter, Together o gateways sin cambiar la app. Incluye diagnóstico sin revelar claves, persistencia de salida, alcance, período, prioridad, confianza, evidencia y fecha.
+- Portada sin insight fijo. Si no existe análisis, muestra un estado vacío; si faltan datos, AI-CFO devuelve `insufficient_data`.
+- Pantalla Patrimonio derivada de cuentas Firefly y proyectos del Pocket Engine, sin sumar monedas diferentes.
+- Script `scripts/firefly-admin.sh start|stop|status`, limitado a loopback y sin eliminación de volúmenes.
+- Migración Prisma `202607210002_finnest_profiles`, aditiva y no destructiva.
+
+### Verificación realizada durante la implementación
+
+- Instalación reproducible: `CI=true pnpm install --frozen-lockfile` correcta.
+- Prisma Client generado correctamente con los nuevos modelos y campos.
+- `pnpm check`: TypeScript y Svelte con 0 errores y 0 advertencias.
+- `pnpm test`: 21 pruebas de dominio y 22 pruebas API aprobadas en la primera ronda; se añadieron después pruebas de perfiles y activos PWA para la verificación final.
+- No se usaron claves reales, datos del servidor ni operaciones contra el hogar existente.
+
+### Pendiente de la verificación final de esta rama
+
+- Ejecutar `pnpm verify`, pytest, generación reproducible de iconos, validaciones Compose y builds Docker.
+- Ejecutar el smoke integrado; si Docker no está disponible en esta estación, CI debe hacerlo en Ubuntu y se debe conservar el resultado como pendiente, no ocultarlo.
+- Inspección visual y screenshots en 390, 430 y escritorio.
+- Publicar la rama, crear PR y esperar todos los checks sin fusionar ni desplegar.
+
+### Migración y rollback
+
+La actualización del servidor se realizará únicamente después de revisión manual y merge. El procedimiento es `scripts/backup.sh`, árbol Git limpio y `DEPLOY_TARGET=private scripts/update-server.sh`. No usar `docker compose down -v`, no renombrar volúmenes ni cambiar `COMPOSE_PROJECT_NAME`. El rollback de código usa `runtime/deploy/last-update.env`; las columnas nuevas son compatibles hacia atrás y no requieren borrarse para volver temporalmente a la imagen anterior.
