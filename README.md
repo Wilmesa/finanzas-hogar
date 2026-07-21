@@ -18,9 +18,9 @@ El repositorio contiene una **beta funcional y desplegable** de la Fase 1. Tiene
 - Adaptador Firefly por libro compartido o privado.
 - Servicio AI-CFO FastAPI con proveedor OpenAI opcional, JSON Schema y validación de evidencia.
 - Noticias persistentes de BanRep y Alpha Vantage opcional, normalizadas y deduplicadas.
-- Workflow n8n de recordatorio diario por Telegram; Web Push queda preparado como siguiente adaptador.
-- Docker Compose con Caddy, Firefly, Keycloak, PostgreSQL, Redis y n8n.
-- Scripts de preflight, configuración de dominio, despliegue, backup y restauración.
+- Web Push nativo con horarios múltiples configurables por miembro y registro idempotente de entregas; n8n es un disparador opcional.
+- Docker Compose por target: privado Tailscale, público opcional y n8n integrado bajo perfil explícito.
+- Scripts de preflight, configuración runtime, despliegue, actualización, backup y restauración.
 
 En modo local, bolsillos, movimientos, asignaciones y ajustes se guardan en `localStorage` y pueden exportarse/importarse como JSON. En modo servidor, la PWA usa OIDC con PKCE y llama a la API; el navegador nunca recibe tokens de Firefly.
 
@@ -37,7 +37,7 @@ Abra `http://127.0.0.1:5173`. No hace falta crear `.env`, instalar PostgreSQL ni
 
 Para probar la instalación PWA en el computador use **Más → Instalar app** cuando el navegador lo ofrezca. En iPhone/iPad use **Compartir → Añadir a pantalla de inicio**. El modo instalable requiere HTTPS en el servidor (localhost es la excepción de desarrollo). Después de visitar una pantalla al menos una vez, la interfaz puede volver a abrirla sin conexión; las respuestas de `/api` y `/auth` nunca se cachean.
 
-Para desarrollo integrado con API, PostgreSQL local y `DEV_AUTH_ENABLED=true`:
+Para desarrollo integrado aislado puede usar `DEV_AUTH_ENABLED=true` únicamente en localhost; nunca lo active en los targets `private` o `public`:
 
 ```bash
 cp .env.example .env
@@ -54,40 +54,44 @@ x-member-id: member-a
 x-member-name: Ana
 ```
 
-## Ejecutar el stack self-hosted
+## Despliegue privado recomendado
 
-1. Generar `.env` con secretos aleatorios.
-2. Configurar dominio y redirect URI de Keycloak.
-3. Completar los tokens Firefly y ejecutar el preflight.
-4. Desplegar:
+El target privado publica una única entrada en `127.0.0.1:${APP_LOCAL_PORT}`. Tailscale Serve termina TLS y conserva PWA, API y Keycloak bajo el mismo origen. PostgreSQL, Redis, web, API, AI-CFO y Keycloak no publican puertos; n8n no se inicia.
 
 ```bash
 node scripts/init-env.mjs
 # editar .env
 node scripts/configure-domain.mjs
 node scripts/preflight.mjs
-scripts/deploy.sh
-docker compose run --rm api pnpm --filter @finanzas/api prisma:seed
+DEPLOY_TARGET=private scripts/deploy.sh
 ```
 
-5. Crear en Firefly un contexto compartido y uno privado por miembro; guardar sus PAT únicamente en el `.env` del servidor.
-6. Importar `infra/n8n/daily-reminder.workflow.json` y activarlo después de comprobar la zona horaria.
+La instalación inicial sin PAT usa explícitamente `--bootstrap`. Consulte la guía completa antes de ejecutarla:
 
-No exponga directamente Firefly, PostgreSQL, Redis, n8n ni el servicio AI-CFO a Internet. Solo Caddy debe aceptar tráfico público.
+- [Despliegue privado con Tailscale](docs/DEPLOY_PRIVATE_TAILSCALE.md)
+- [Migración general](docs/MIGRATION.md)
 
 ### Instalar y actualizar desde Git
 
 En el servidor, clone el repositorio y conserve `.env` únicamente allí:
 
 ```bash
-git clone <URL-DEL-REPOSITORIO> /opt/nuestro-dinero
-cd /opt/nuestro-dinero
+git clone https://github.com/Wilmesa/finanzas-hogar.git /ruta/configurable/app
+cd /ruta/configurable/app
 node scripts/init-env.mjs
-# editar .env y configurar dominio/tokens
-scripts/deploy.sh
+# editar .env, generar runtime y ejecutar preflight
+DEPLOY_TARGET=private scripts/deploy.sh
 ```
 
-Las siguientes actualizaciones se aplican con `scripts/update-server.sh`. El script se niega a continuar si encuentra cambios locales, crea un backup, exige avance lineal de Git, repite el preflight y reconstruye los contenedores.
+Las actualizaciones se aplican manualmente con `DEPLOY_TARGET=private scripts/update-server.sh`. El script exige Git limpio, crea un backup consistente, registra el commit anterior, usa avance lineal, valida, migra y espera healthchecks. No hay actualizaciones automáticas.
+
+Un despliegue público tradicional requiere selección explícita:
+
+```bash
+DEPLOY_TARGET=public scripts/deploy.sh
+```
+
+El n8n incluido solo existe para instalaciones independientes y requiere el perfil `bundled-n8n`; el entorno privado previsto usa el n8n externo del servidor.
 
 El stack fija Firefly `6.6.3`, Keycloak `26.6.3` y n8n `2.29.11`. Antes de cualquier actualización se debe crear un backup y repetir las pruebas de aceptación.
 
@@ -112,15 +116,18 @@ python3 -m pytest services/ai-cfo/tests -q
 - `POST /v1/transactions`: registra en el libro Firefly correcto y guarda su atribución.
 - `POST /v1/projections/*`: ahorro, CDT, deuda, inversión e inmuebles sin modificar Firefly.
 - `POST /v1/insights/generate`: construye un snapshot permitido y lo envía al AI-CFO.
-- `GET /v1/automation/reminders/eligible`: endpoint exclusivo de n8n.
+- `GET/PUT /v1/reminders/preferences`: consulta y configura horarios individuales.
+- `GET /v1/push/public-key` y `POST/DELETE /v1/push/subscriptions`: registra cada dispositivo PWA.
+- `POST /v1/automation/reminders/process`: disparador opcional autenticado para n8n.
 
 Los comandos monetarios exigen `Idempotency-Key`.
 
 ## Límites conocidos de la beta
 
 - El stack Docker no pudo ejecutarse en esta estación porque Docker no está instalado; debe pasar preflight y pruebas E2E en el servidor antes de usar datos reales.
+- La estructura privada/pública se valida en CI mediante `docker compose config` y build de las imágenes propias, pero los contenedores integrados deben superar healthchecks en Ubuntu antes de datos reales.
 - La inspección visual automatizada y el comportamiento offline se registran en `BITACORA.md`; el stack completo aún debe probarse en una máquina con Docker.
-- Web Push necesita suscripciones VAPID; Telegram ya está integrado cuando se configuran bot y chat IDs.
+- Web Push requiere instalar la PWA, conceder permiso en cada dispositivo y completar una prueba real de entrega en el servidor. En iOS se necesita una PWA añadida a la pantalla de inicio.
 - La ingesta BanRep/Alpha Vantage está implementada, pero debe verificarse con red real y ajustar el parser si BanRep modifica su feed.
 - La operación privada financiada desde el libro común requiere un outbox/saga para compensar una caída entre ambas escrituras Firefly.
 - Falta imponer RLS con un rol PostgreSQL de runtime separado y añadir pruebas E2E con Keycloak/Firefly reales.

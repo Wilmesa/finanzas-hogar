@@ -61,7 +61,7 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 - Corregido el mapeo estable entre IDs Keycloak, miembros del producto y tokens Firefly privados.
 - Añadidos audience/attribute mappers y PKCE al realm Keycloak.
 - Implementada ingesta persistente y deduplicada de noticias BanRep y Alpha Vantage opcional.
-- Añadidos recordatorios reales por Telegram desde la API; mensajes genéricos sin contenido privado.
+- Añadido el primer adaptador externo de recordatorios con mensajes genéricos; fue sustituido posteriormente por Web Push nativo.
 - Corregida la fecha de elegibilidad de recordatorios para `America/Bogota`.
 - Añadidos `init-env`, `configure-domain`, `preflight`, `deploy`, `backup` y `restore`.
 - Añadida guía detallada `docs/MIGRATION.md` y puertos locales protegidos para Firefly/n8n mediante túnel SSH.
@@ -154,6 +154,75 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 - La instalación mediante el prompt nativo depende del navegador; en iOS se usa **Compartir → Añadir a pantalla de inicio**.
 - El repositorio todavía requiere configurar un remoto y credenciales Git para publicarlo.
 
+### 2026-07-20 — Preparación DevSecOps para Tailscale privado
+
+#### Diagnóstico
+
+- Compose fijaba `name: finanzas-pareja`, abría 80/443 por defecto e iniciaba el n8n incluido siempre.
+- Existían valores de respaldo inseguros para PostgreSQL, Keycloak, Firefly, AI-CFO y n8n.
+- `configure-domain.mjs` modificaba un realm versionado y dejaba Git sucio.
+- `APP_DOMAIN` no representaba correctamente un origen HTTPS con puerto.
+- Backup y restore asumían nombres de volúmenes rígidos y no conservaban metadata de commit/imágenes.
+
+#### Implementado
+
+- Separados `docker-compose.yml`, `docker-compose.private.yml`, `docker-compose.public.yml` y el override administrativo temporal de Firefly.
+- Eliminado el nombre Compose rígido; `COMPOSE_PROJECT_NAME` aísla dev y producción.
+- Target privado limitado a un gateway en `127.0.0.1:${APP_LOCAL_PORT}`; ningún otro servicio publica puertos.
+- Separadas redes `edge` y `backend`; PostgreSQL/Redis permanecen sin exposición.
+- n8n incluido movido al perfil `bundled-n8n`; el workflow y la integración externa se conservan.
+- Añadidos healthchecks funcionales para gateway, web, API, AI-CFO, PostgreSQL, Redis, Firefly, Keycloak y n8n opcional.
+- Añadida rotación de logs Docker a tres archivos de 10 MB. No se impusieron capacidades/read-only a imágenes de terceros sin prueba integrada.
+- Sustituidos secretos fallback por interpolación obligatoria y generación criptográfica idempotente.
+- Introducido `APP_ORIGIN` con validación de HTTPS, puerto opcional y prohibición de rutas/credenciales.
+- Convertido el realm Keycloak en plantilla; el runtime ignorado se genera con permisos 0600 y se sincroniza mediante `kcadm`.
+- Adaptados deploy/update para target explícito, migraciones, esperas de health, backup previo, commit de rollback y `git pull --ff-only`.
+- Backup formato 2 incluye PostgreSQL, Firefly upload, Redis, volúmenes opcionales presentes, runtime, `.env` protegido, imágenes y metadata. Restore exige confirmación y compatibilidad.
+- Creada `docs/DEPLOY_PRIVATE_TAILSCALE.md` con bootstrap, Tailscale Serve, aceptación, n8n externo, actualización, rollback y eliminación segura.
+
+#### Verificación realizada hasta este punto
+
+- YAML de los cuatro archivos Compose válido sintácticamente.
+- Scripts Node y shell válidos sintácticamente.
+- Cuatro pruebas nuevas de APP_ORIGIN, realm y secretos aprobadas.
+- TypeScript/Svelte: cero errores y advertencias.
+- `init-env` ejecutado dos veces sin sustituir secretos válidos.
+- `configure-domain` ejecutado dos veces con hash idéntico y sin cambiar `git status`.
+- Runtime y `.env` generados con permisos 0600.
+- Preflight bootstrap sin Docker aprobado y PAT pendientes reportados como advertencias.
+
+#### Pendiente antes de fusionar
+
+- Suite completa, build PWA/API/AI, validaciones finales y revisión estática de puertos.
+- `docker compose config` y build de imágenes no pueden ejecutarse localmente porque esta estación no tiene Docker; se configuraron como controles obligatorios de CI.
+- Prueba E2E integrada seguirá siendo obligatoria en Ubuntu antes de usar datos reales.
+
+### 2026-07-20 — Recordatorios configurables Web Push
+
+#### Implementado
+
+- Eliminado el canal de mensajería externo, sus secretos, endpoints y ramas de workflow.
+- Añadidas preferencias individuales con zona horaria y múltiples horas `HH:mm`; cada miembro administra sus horarios desde **Más**.
+- Añadido registro por dispositivo mediante Push API/VAPID. Las claves se generan de forma criptográfica e idempotente con `init-env` y nunca se imprimen.
+- Añadido planificador interno cada 30 segundos y endpoint opcional para n8n cada minuto. La restricción única miembro/fecha/hora evita envíos duplicados.
+- Añadida trazabilidad `ReminderDelivery` con estados `processing`, `sent` o `failed`, sin guardar contenido financiero.
+- Los check-ins diarios detienen los recordatorios restantes; las suscripciones expiradas se eliminan al recibir HTTP 404/410 del proveedor Push.
+- El service worker muestra un texto genérico y abre la captura rápida al tocar la notificación.
+
+#### Verificado
+
+- Prisma Client generado con las nuevas tablas y relaciones.
+- `pnpm check`: cero errores y cero advertencias.
+- `pnpm test`: 12 pruebas de dominio, 2 pruebas de recordatorios y 5 pruebas operativas aprobadas.
+- `.env` recibió un par VAPID válido sin mostrar valores y conserva permisos 0600.
+- Inspección responsive en navegador a 390 × 844: tarjeta de recordatorios contenida en 360 px, documento sin desbordamiento horizontal y consola sin errores ni advertencias. En modo local se muestra correctamente como función disponible al conectar el servidor.
+
+#### Pendiente
+
+- Aplicar la migración en PostgreSQL real durante el primer despliegue.
+- Probar entrega de extremo a extremo en Android y en iOS con la PWA instalada desde el origen HTTPS Tailscale.
+- Confirmar el comportamiento del sistema operativo con ahorro de batería y permisos revocados; Push no garantiza una hora exacta al segundo.
+
 ## Cómo funciona el programa
 
 ### 1. PWA
@@ -180,9 +249,9 @@ Los cálculos son determinísticos. El LLM solo redacta explicaciones usando un 
 
 PostgreSQL conserva fuentes, ocurrencias fechadas, destinos y revisiones. Un ingreso esperado se muestra en el calendario, pero no aumenta la disponibilidad. Firefly solo se enlaza cuando exista una transacción recibida y conciliada.
 
-### 7. n8n
+### 7. Recordatorios Web Push y n8n
 
-n8n activa horarios y solicita a la API quién debe recibir un recordatorio. No decide privacidad, no lee Firefly y no contiene credenciales financieras.
+La API compara cada minuto aproximado con los horarios individuales, evita duplicados mediante una clave por miembro/fecha/hora y entrega un Web Push genérico a cada dispositivo registrado. n8n es un disparador redundante opcional: no decide horarios, no lee Firefly y no contiene credenciales financieras.
 
 ## Antes de producción
 
@@ -195,60 +264,21 @@ n8n activa horarios y solicita a la API quién debe recibir un recordatorio. No 
 - [ ] Crear contextos/tokens Firefly compartido y privados.
 - [ ] Ejecutar migraciones y seed inicial.
 - [ ] Probar alta, gasto, aporte, privacidad y conciliación con Firefly real.
-- [ ] Importar y probar el workflow de n8n.
+- [ ] Instalar la PWA en ambos móviles, conceder permiso y probar cada suscripción Web Push.
+- [ ] Si se desea redundancia, importar y probar el workflow opcional de n8n.
 - [ ] Probar backup y restauración en otra máquina.
 - [ ] Revisar retención de datos del proveedor LLM.
 - [x] Completar pruebas visuales básicas móvil/escritorio y prueba offline de la PWA.
 
 ## Migración completa al servidor
 
-### Requisitos del servidor
-
-- Linux x86_64 o arm64 actualizado.
-- Docker Engine con plugin Compose.
-- 4 CPU, 8 GB de RAM y 40 GB SSD como base recomendada.
-- Dominio o subdominio con registros DNS hacia el servidor.
-- Puertos públicos 80 y 443; SSH restringido por clave.
-- Directorio persistente, por ejemplo `/opt/nuestro-dinero`.
-
-### Procedimiento
-
-1. Crear un backup verificable del entorno origen si ya contiene datos.
-2. Clonar o copiar el repositorio en `/opt/nuestro-dinero`.
-3. Copiar `.env.example` a `.env` y reemplazar todas las claves.
-4. Ejecutar `node scripts/preflight.mjs`.
-5. Cambiar `APP_DOMAIN` y los redirect URI exactos de Keycloak.
-6. Ejecutar `docker compose pull` y `docker compose build`.
-7. Ejecutar `docker compose up -d postgres redis keycloak firefly`.
-8. Esperar health checks; después ejecutar `docker compose up -d api ai-cfo web caddy n8n`.
-9. Ejecutar `docker compose run --rm api pnpm --filter @finanzas/api prisma:seed` una sola vez.
-10. Crear los usuarios y MFA en Keycloak.
-11. Crear o importar los libros Firefly y guardar sus PAT en `.env`.
-12. Importar `infra/n8n/daily-reminder.workflow.json`, probarlo manualmente y activarlo.
-13. Ejecutar pruebas de aceptación con cantidades pequeñas y datos ficticios.
-14. Ejecutar `scripts/backup.sh`, copiar el archivo fuera del servidor y probar `scripts/restore.sh` en una instalación aislada.
-
-### Trasladar datos existentes
-
-- **PostgreSQL:** restaurar el dump generado por `scripts/backup.sh` antes de levantar API, Keycloak y n8n.
-- **Firefly:** restaurar su base PostgreSQL y el volumen `firefly_upload` como una unidad consistente.
-- **PWA local:** exportar JSON desde la aplicación y luego importarlo al modo servidor; no copiar manualmente LocalStorage.
-- **Secretos:** recrearlos en el servidor; nunca incluir `.env` dentro del backup compartido.
-- **Dominio:** actualizar DNS después de validar el nuevo servidor mediante un host local o subdominio temporal.
-
-### Rollback
-
-1. No eliminar el servidor anterior durante la ventana de validación.
-2. Detener escrituras en ambos entornos.
-3. Si el nuevo despliegue falla, volver a apuntar DNS al servidor anterior.
-4. Restaurar únicamente desde un backup cuya suma SHA-256 haya sido verificada.
-5. Registrar causa, alcance, timestamps y acciones en esta bitácora.
+El procedimiento vigente y probado por diseño está en `docs/DEPLOY_PRIVATE_TAILSCALE.md`; `docs/MIGRATION.md` explica el traslado genérico entre máquinas. Ambos usan una ruta configurable, `APP_ORIGIN`, los overrides por target y `scripts/compose.sh`. No se deben seguir instrucciones antiguas que publiquen directamente servicios internos o invoquen Compose sin seleccionar target.
 
 ## Pendientes conocidos
 
 Esta lista debe reducirse antes de declarar versión estable:
 
-- Web Push real con suscripciones VAPID.
+- Prueba E2E de Web Push en Android y en una PWA instalada en iOS contra el origen Tailscale real.
 - Worker BullMQ y dead-letter queue.
 - RLS forzado con rol PostgreSQL de runtime separado.
 - Observabilidad Prometheus/Grafana/Loki conectada al código.

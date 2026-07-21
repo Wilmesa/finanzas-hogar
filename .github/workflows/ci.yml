@@ -24,6 +24,16 @@ jobs:
       - run: pnpm pwa:icons && git diff --exit-code -- apps/web/static/icons
       - run: pnpm verify
       - run: test -f apps/web/build/client/service-worker.js
+      - name: Validar despliegues Compose
+        run: |
+          node scripts/init-env.mjs
+          node scripts/configure-domain.mjs
+          node scripts/preflight.mjs --bootstrap
+          DEPLOY_TARGET=private scripts/compose.sh config --quiet
+          DEPLOY_TARGET=public scripts/compose.sh config --quiet
+          test -z "$(git status --porcelain)"
+      - name: Construir imágenes propias
+        run: DEPLOY_TARGET=private scripts/compose.sh build web api ai-cfo
 
   ai-cfo:
     runs-on: ubuntu-latest

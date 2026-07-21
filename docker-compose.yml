@@ -1,55 +1,53 @@
-name: finanzas-pareja
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
 
 x-app-env: &app-env
   TZ: America/Bogota
-  DATABASE_URL: postgresql://finanzas:${POSTGRES_PASSWORD:-change-me}@postgres:5432/finanzas
+  APP_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}
+  DATABASE_URL: postgresql://finanzas:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}@postgres:5432/finanzas
   REDIS_URL: redis://redis:6379
   FIREFLY_BASE_URL: http://firefly:8080
   AI_CFO_URL: http://ai-cfo:8000
-  AI_CFO_INTERNAL_TOKEN: ${AI_CFO_INTERNAL_TOKEN:-local-ai-token-change-me}
-  N8N_AUTOMATION_TOKEN: ${N8N_AUTOMATION_TOKEN:-local-n8n-token-change-me}
+  AI_CFO_INTERNAL_TOKEN: ${AI_CFO_INTERNAL_TOKEN:?AI_CFO_INTERNAL_TOKEN es obligatorio}
+  N8N_AUTOMATION_TOKEN: ${N8N_AUTOMATION_TOKEN:?N8N_AUTOMATION_TOKEN es obligatorio}
+  VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?VAPID_PUBLIC_KEY es obligatorio}
+  VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?VAPID_PRIVATE_KEY es obligatorio}
 
 services:
-  caddy:
-    image: caddy:2.10-alpine
-    restart: unless-stopped
-    ports: ["80:80", "443:443", "443:443/udp"]
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN:-localhost}
-    volumes:
-      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on: [web, api]
-
   web:
+    <<: *service-defaults
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-    restart: unless-stopped
     environment:
       PUBLIC_DATA_MODE: server
       PUBLIC_API_BASE_URL: /api
       PUBLIC_KEYCLOAK_URL: /auth
       PUBLIC_KEYCLOAK_REALM: finanzas
       PUBLIC_KEYCLOAK_CLIENT_ID: finanzas-web
+    networks: [edge]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   api:
+    <<: *service-defaults
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    restart: unless-stopped
-    command:
-      [
-        "sh",
-        "-c",
-        "pnpm --filter @finanzas/api exec prisma migrate deploy && pnpm --filter @finanzas/api start",
-      ]
     environment:
       <<: *app-env
       NODE_ENV: production
-      APP_BASE_URL: https://${APP_DOMAIN:-localhost}
-      KEYCLOAK_ISSUER: https://${APP_DOMAIN:-localhost}/auth/realms/finanzas
+      APP_BASE_URL: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}
+      KEYCLOAK_ISSUER: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}/auth/realms/finanzas
       KEYCLOAK_JWKS_URL: http://keycloak:8080/auth/realms/finanzas/protocol/openid-connect/certs
       KEYCLOAK_AUDIENCE: finanzas-api
       DEV_AUTH_ENABLED: "false"
@@ -57,80 +55,114 @@ services:
       HOUSEHOLD_ID: ${HOUSEHOLD_ID:-household-demo}
       HOUSEHOLD_NAME: ${HOUSEHOLD_NAME:-Nuestro hogar}
       MEMBER_A_ID: ${MEMBER_A_ID:-member-a}
-      MEMBER_A_NAME: ${MEMBER_A_NAME:-Ana}
-      MEMBER_A_EMAIL: ${MEMBER_A_EMAIL:-ana@example.local}
+      MEMBER_A_NAME: ${MEMBER_A_NAME:-Miembro A}
+      MEMBER_A_EMAIL: ${MEMBER_A_EMAIL:-member-a@example.invalid}
       MEMBER_B_ID: ${MEMBER_B_ID:-member-b}
-      MEMBER_B_NAME: ${MEMBER_B_NAME:-Leo}
-      MEMBER_B_EMAIL: ${MEMBER_B_EMAIL:-leo@example.local}
+      MEMBER_B_NAME: ${MEMBER_B_NAME:-Miembro B}
+      MEMBER_B_EMAIL: ${MEMBER_B_EMAIL:-member-b@example.invalid}
       FIREFLY_PRIVATE_TOKEN_MEMBER_A: ${FIREFLY_PRIVATE_TOKEN_MEMBER_A:-}
       FIREFLY_PRIVATE_TOKEN_MEMBER_B: ${FIREFLY_PRIVATE_TOKEN_MEMBER_B:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID_MEMBER_A: ${TELEGRAM_CHAT_ID_MEMBER_A:-}
-      TELEGRAM_CHAT_ID_MEMBER_B: ${TELEGRAM_CHAT_ID_MEMBER_B:-}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      firefly: { condition: service_healthy }
+      ai-cfo: { condition: service_healthy }
+    networks: [edge, backend]
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   ai-cfo:
+    <<: *service-defaults
     build: ./services/ai-cfo
-    restart: unless-stopped
     environment:
       TZ: America/Bogota
-      AI_CFO_INTERNAL_TOKEN: ${AI_CFO_INTERNAL_TOKEN:-local-ai-token-change-me}
+      AI_CFO_INTERNAL_TOKEN: ${AI_CFO_INTERNAL_TOKEN:?AI_CFO_INTERNAL_TOKEN es obligatorio}
       AI_PROVIDER: ${AI_PROVIDER:-disabled}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-terra}
+    networks: [backend]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   postgres:
+    <<: *service-defaults
     image: postgres:17-alpine
-    restart: unless-stopped
     environment:
       POSTGRES_USER: finanzas
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}
       POSTGRES_DB: finanzas
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/10-databases.sql:ro
+    networks: [backend]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finanzas"]
+      test: ["CMD-SHELL", "pg_isready -U finanzas -d finanzas"]
       interval: 5s
       timeout: 5s
-      retries: 12
+      retries: 20
+      start_period: 10s
 
   redis:
+    <<: *service-defaults
     image: redis:8-alpine
-    restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes: ["redis_data:/data"]
+    networks: [backend]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 12
+      retries: 20
+      start_period: 5s
 
   firefly:
+    <<: *service-defaults
     image: fireflyiii/core:version-6.6.3
-    restart: unless-stopped
-    ports: ["127.0.0.1:${FIREFLY_LOCAL_PORT:-8081}:8080"]
     environment:
       APP_ENV: production
-      APP_KEY: ${FIREFLY_APP_KEY:-SomeRandomStringOf32CharsExactly!}
+      APP_KEY: ${FIREFLY_APP_KEY:?FIREFLY_APP_KEY es obligatorio}
       DB_CONNECTION: pgsql
       DB_HOST: postgres
       DB_PORT: 5432
       DB_DATABASE: firefly
       DB_USERNAME: finanzas
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}
       TZ: America/Bogota
       TRUSTED_PROXIES: "**"
     volumes: ["firefly_upload:/var/www/html/storage/upload"]
     depends_on:
       postgres: { condition: service_healthy }
+    networks: [backend]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1",
+        ]
+      interval: 20s
+      timeout: 8s
+      retries: 15
+      start_period: 60s
 
   keycloak:
+    <<: *service-defaults
     image: quay.io/keycloak/keycloak:26.6.3
-    restart: unless-stopped
     command:
       [
         "start",
@@ -143,37 +175,70 @@ services:
         "/auth",
       ]
     environment:
+      APP_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: finanzas
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-me-now}
-      KC_HOSTNAME: https://${APP_DOMAIN:-localhost}/auth
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD es obligatorio}
+      KC_HOSTNAME: ${APP_ORIGIN:?APP_ORIGIN es obligatorio}/auth
       KC_HOSTNAME_STRICT: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HTTP_MANAGEMENT_SCHEME: http
     volumes:
-      - ./infra/keycloak/finanzas-realm.json:/opt/keycloak/data/import/finanzas-realm.json:ro
+      - ./runtime/keycloak/finanzas-realm.json:/opt/keycloak/data/import/finanzas-realm.json:ro
     depends_on:
       postgres: { condition: service_healthy }
+    networks: [edge, backend]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "{ printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0; grep -q 'HTTP/1.0 200'; } 0<>/dev/tcp/127.0.0.1/9000",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 24
+      start_period: 45s
 
   n8n:
+    <<: *service-defaults
+    profiles: ["bundled-n8n"]
     image: n8nio/n8n:2.29.11
-    restart: unless-stopped
-    ports: ["127.0.0.1:${N8N_LOCAL_PORT:-5678}:5678"]
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_DATABASE: n8n
       DB_POSTGRESDB_USER: finanzas
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}
       GENERIC_TIMEZONE: America/Bogota
       TZ: America/Bogota
       FINANZAS_API_URL: http://api:3000
-      N8N_AUTOMATION_TOKEN: ${N8N_AUTOMATION_TOKEN:-local-n8n-token-change-me}
-      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change-this-before-production}
+      N8N_AUTOMATION_TOKEN: ${N8N_AUTOMATION_TOKEN:?N8N_AUTOMATION_TOKEN es obligatorio}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY es obligatorio}
     volumes: ["n8n_data:/home/node/.n8n"]
     depends_on:
       postgres: { condition: service_healthy }
+      api: { condition: service_healthy }
+    networks: [backend]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5678/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+networks:
+  edge:
+  backend:
 
 volumes:
   caddy_data:

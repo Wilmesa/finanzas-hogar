@@ -1,0 +1,304 @@
+# Despliegue privado con Tailscale Serve
+
+Esta guía instala un entorno experimental aislado en Ubuntu Server 24.04. Tailscale termina TLS y reenvía al único puerto publicado por Compose: el gateway HTTP enlazado a `127.0.0.1`. No se abren 80/443, PostgreSQL, Redis, Keycloak, API, PWA, AI-CFO o n8n directamente en el host.
+
+## 1. Requisitos
+
+- Ubuntu Server 24.04 actualizado.
+- Usuario operativo sin uso cotidiano de `root`, con acceso al grupo Docker.
+- Docker Engine y plugin Compose actuales.
+- Git, Node.js 22+ y Tailscale activo.
+- Acceso SSH mediante llave y UFW activo.
+- Al menos 4 CPU, 8 GB RAM y 40 GB libres para la prueba integrada.
+- Un backup externo antes de cualquier actualización con datos.
+
+Compruebe:
+
+```bash
+docker --version
+docker compose version
+tailscale status
+node --version
+```
+
+## 2. Clonar el repositorio
+
+```bash
+sudo mkdir -p /srv/stacks/presupuesto-dev
+sudo chown hunter:hunter /srv/stacks/presupuesto-dev
+git clone https://github.com/Wilmesa/finanzas-hogar.git /srv/stacks/presupuesto-dev/app
+cd /srv/stacks/presupuesto-dev/app
+```
+
+Si el repositorio se vuelve privado, configure una deploy key de solo lectura en el servidor y cambie el remoto a SSH. No copie la clave privada del computador personal.
+
+## 3. Crear `.env`
+
+```bash
+node scripts/init-env.mjs
+chmod 600 .env
+nano .env
+```
+
+El generador es idempotente: añade variables ausentes y sustituye únicamente secretos vacíos o marcadores inseguros. No imprime secretos ni reemplaza valores válidos existentes.
+
+## 4. Variables requeridas
+
+Para este entorno de prueba configure, como mínimo:
+
+```dotenv
+DEPLOY_TARGET=private
+COMPOSE_PROJECT_NAME=finanzas-hogar-dev
+APP_ORIGIN=https://servidor-hogar.tail5190d1.ts.net:8446
+APP_LOCAL_PORT=3100
+DEV_AUTH_ENABLED=false
+```
+
+Complete nombres del hogar y miembros. Los tres PAT de Firefly se añaden después del bootstrap. No reutilice credenciales de Supabase, n8n externo o cualquier otro stack.
+
+Para una futura producción use otro nombre, por ejemplo `finanzas-hogar-prod`, otro `.env`, otra ruta y otro origen. El prefijo Compose mantiene separados volúmenes, redes y contenedores.
+
+## 5. APP_ORIGIN
+
+`APP_ORIGIN` es la fuente canónica del origen externo. Debe ser una URL HTTPS completa, puede incluir puerto y no puede incluir ruta, query, fragmento ni credenciales.
+
+Válido:
+
+```text
+https://servidor-hogar.tail5190d1.ts.net:8446
+```
+
+Inválidos:
+
+```text
+http://servidor-hogar
+https://servidor-hogar/auth
+```
+
+La API usa el origen para CORS y para validar el issuer. Keycloak usa el mismo origen para hostname, redirect URI y web origin. Las conexiones internas siguen usando DNS Docker.
+
+## 6. Generar configuración y preflight
+
+Primer bootstrap, todavía sin PAT de Firefly:
+
+```bash
+node scripts/configure-domain.mjs
+node scripts/preflight.mjs --bootstrap
+git status --porcelain
+```
+
+El último comando debe quedar vacío. El realm generado vive en `runtime/keycloak/`, está ignorado por Git y tiene permisos restrictivos.
+
+Una vez configurados los PAT, el control obligatorio es:
+
+```bash
+node scripts/configure-domain.mjs
+node scripts/preflight.mjs
+```
+
+## 7. Despliegue privado inicial
+
+```bash
+DEPLOY_TARGET=private scripts/deploy.sh --bootstrap
+```
+
+El script valida configuración, construye imágenes propias, inicia dependencias con healthchecks, ejecuta migraciones Prisma, sincroniza el cliente OIDC e inicia API, PWA y gateway. No inicia el n8n incluido.
+
+Compruebe que solamente el gateway está publicado:
+
+```bash
+scripts/compose.sh ps
+sudo ss -lntp | grep 3100
+curl -fsS http://127.0.0.1:3100/healthz
+```
+
+La dirección esperada es `127.0.0.1:3100`, nunca `0.0.0.0:3100`.
+
+## 8. Publicar mediante Tailscale Serve
+
+```bash
+sudo tailscale serve --bg --https=8446 http://127.0.0.1:3100
+sudo tailscale serve status
+```
+
+Tailscale termina HTTPS y Caddy conserva el mismo origen para `/`, `/api/*` y `/auth/*`. No configure Funnel y no abra 80/443 en UFW. Consulte la [referencia actual de Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve).
+
+## 9. Configuración inicial de Keycloak
+
+Abra desde un dispositivo del tailnet:
+
+```text
+https://servidor-hogar.tail5190d1.ts.net:8446/auth/admin/
+```
+
+1. Ingrese al realm `finanzas` con el administrador de `.env`.
+2. Cree dos usuarios y exija `VERIFY_EMAIL`, `UPDATE_PASSWORD` y `CONFIGURE_TOTP`.
+3. Configure `household_id` con el mismo UUID/ID para ambos.
+4. Configure `household_role` como `owner` y `member`.
+5. Copie el `sub`/ID interno de cada usuario a `MEMBER_A_ID` y `MEMBER_B_ID` en `.env`.
+6. Ejecute nuevamente `scripts/deploy.sh` para sincronizar y después el seed una sola vez:
+
+```bash
+scripts/compose.sh run --rm api pnpm --filter @finanzas/api prisma:seed
+```
+
+No active `DEV_AUTH_ENABLED`.
+
+## 10. Configuración inicial de Firefly
+
+Habilite temporalmente el puerto administrativo solo en loopback:
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.private.yml \
+  -f docker-compose.firefly-admin.yml \
+  up -d firefly
+```
+
+Desde el computador administrador cree un túnel:
+
+```bash
+ssh -L 8081:127.0.0.1:8081 hunter@servidor-hogar
+```
+
+Abra `http://127.0.0.1:8081`, cree el contexto compartido y los contextos privados, y genere los tres PAT. Guárdelos únicamente en `.env`:
+
+```dotenv
+FIREFLY_HOUSEHOLD_TOKEN=...
+FIREFLY_PRIVATE_TOKEN_MEMBER_A=...
+FIREFLY_PRIVATE_TOKEN_MEMBER_B=...
+```
+
+Después ejecute el despliegue normal y retire el puerto temporal recreando Firefly con los archivos habituales:
+
+```bash
+DEPLOY_TARGET=private scripts/deploy.sh
+scripts/compose.sh up -d --force-recreate firefly
+sudo ss -lntp | grep 8081 && echo "REVISAR: el puerto temporal sigue activo" || true
+```
+
+## 11. Pruebas de aceptación con datos ficticios
+
+Use cantidades pequeñas y ficticias:
+
+1. Iniciar sesión con MFA desde ambos usuarios.
+2. Crear un bolsillo compartido y comprobar visibilidad mutua.
+3. Crear uno privado y confirmar `404` desde el otro miembro.
+4. Registrar un gasto ficticio y comprobar doble entrada en Firefly.
+5. Repetir la misma idempotency key y confirmar que no se duplica.
+6. Crear una meta por fecha y otra por aporte máximo.
+7. Crear una fuente de ingreso, expectativa y plan con revisión.
+8. Exportar e importar un respaldo JSON local ficticio.
+9. Instalar la PWA y reabrir una vista visitada sin conexión.
+10. Confirmar que `/api/*` y `/auth/*` no aparecen en Cache Storage.
+
+No cargue movimientos reales hasta completar privacidad, backup y restauración.
+
+## 12. n8n externo
+
+El servidor usa su n8n existente. No ejecute el perfil `bundled-n8n`. Más adelante:
+
+1. Web Push ya se procesa cada 30 segundos dentro de la API; n8n no es obligatorio.
+2. Si desea un disparador redundante, importe `infra/n8n/daily-reminder.workflow.json` en el n8n existente y configure la URL de API mediante el origen Tailscale y `/api`.
+3. Guarde `N8N_AUTOMATION_TOKEN` como credencial de n8n, no dentro del workflow.
+4. Verifique que el contenedor n8n pueda resolver y alcanzar el nombre Tailscale sin abrir nuevos puertos.
+5. Ejecute manualmente con usuarios ficticios antes de activarlo. La clave única de entrega evita duplicados si coinciden el temporizador interno y n8n.
+
+Cada miembro instala la PWA, abre **Más → Recordatorios**, agrega los horarios que necesite y acepta el permiso del sistema. Las preferencias se guardan en su zona horaria y cada navegador genera una suscripción independiente. En iPhone/iPad, Web Push requiere añadir primero la PWA a la pantalla de inicio; la solicitud de permiso debe hacerse desde el botón de la aplicación.
+
+La variante incluida permanece disponible solo con el perfil explícito `bundled-n8n` para instalaciones independientes.
+
+## 13. Logs y diagnóstico
+
+```bash
+scripts/compose.sh ps
+scripts/compose.sh logs --tail=100 gateway api web keycloak firefly ai-cfo
+scripts/compose.sh logs -f api
+docker inspect --format '{{json .State.Health}}' finanzas-hogar-dev-api-1
+```
+
+No copie logs con tokens o datos financieros a servicios públicos.
+
+## 14. Healthchecks
+
+```bash
+curl -fsS http://127.0.0.1:3100/healthz
+curl -fsS http://127.0.0.1:3100/api/health
+curl -fsS "https://servidor-hogar.tail5190d1.ts.net:8446/auth/realms/finanzas/.well-known/openid-configuration" >/dev/null
+scripts/compose.sh ps
+```
+
+Todos los servicios iniciados deben aparecer como `healthy` antes de aceptar escrituras.
+
+## 15. Backup
+
+```bash
+scripts/backup.sh
+cat runtime/deploy/last-backup
+```
+
+El backup incluye todas las bases PostgreSQL, uploads de Firefly, Redis, volúmenes opcionales presentes, realm runtime, commit, versiones de imágenes y una copia `env.secrets`. El directorio contiene secretos: manténgalo con permisos restrictivos, cifre la copia externa y pruebe la restauración en un entorno aislado.
+
+## 16. Actualización controlada
+
+```bash
+cd /srv/stacks/presupuesto-dev/app
+git status --porcelain
+DEPLOY_TARGET=private scripts/update-server.sh
+```
+
+El script cancela con árbol sucio, crea backup, registra el commit anterior, usa `git pull --ff-only`, valida, construye, migra, espera healthchecks y guarda metadatos en `runtime/deploy/last-update.env`. No existen actualizaciones automáticas.
+
+## 17. Rollback manual
+
+No se ejecuta automáticamente. Lea primero:
+
+```bash
+cat runtime/deploy/last-update.env
+```
+
+Después, en ventana de mantenimiento:
+
+```bash
+scripts/compose.sh stop gateway api web keycloak firefly ai-cfo
+git switch --detach <PREVIOUS_COMMIT>
+node scripts/configure-domain.mjs
+DEPLOY_TARGET=private scripts/deploy.sh
+RESTORE_CONFIRM=SI_RESTAURAR scripts/restore.sh <BACKUP_PATH>
+```
+
+La restauración exige coincidencia de commit y proyecto. Los overrides `RESTORE_ALLOW_VERSION_MISMATCH=YES` o `RESTORE_ALLOW_PROJECT_MISMATCH=YES` solo se usan después de una revisión explícita. Finalice repitiendo toda la aceptación.
+
+## 18. Promoción futura a producción
+
+Use una ruta, `COMPOSE_PROJECT_NAME`, `.env`, origen y backups independientes. Pruebe la versión exacta en dev, cree un backup verificado, despliegue el mismo commit en producción y cambie Tailscale Serve o el proxy público únicamente durante la ventana aprobada. Nunca comparta volúmenes entre dev y producción.
+
+## 19. Despliegue público opcional
+
+Solo para otro servidor preparado para Internet:
+
+```bash
+DEPLOY_TARGET=public scripts/deploy.sh
+```
+
+Ese target usa `docker-compose.public.yml` y publica 80/443 mediante Caddy. No lo ejecute en este servidor privado.
+
+## 20. Eliminación segura del entorno de pruebas
+
+1. Cree y retire un último backup cifrado.
+2. Desactive solo el endpoint configurado:
+
+```bash
+sudo tailscale serve --https=8446 off
+```
+
+3. Detenga el stack sin eliminar datos:
+
+```bash
+cd /srv/stacks/presupuesto-dev/app
+scripts/compose.sh down
+```
+
+4. Revise los volúmenes con `docker volume ls | grep finanzas-hogar-dev`.
+5. Elimine volúmenes o la ruta únicamente con autorización explícita y después de verificar el backup. `docker compose down -v` es destructivo y no forma parte del procedimiento normal.
