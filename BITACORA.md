@@ -13,6 +13,24 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 
 ## Registro cronológico
 
+### 2026-07-20 — Prisma Client reproducible en instalaciones limpias
+
+#### Causa raíz
+
+- `pnpm verify` ejecutaba TypeScript antes de `prisma generate`. La estación local conservaba Prisma Client generado en `node_modules`, mientras GitHub Actions comenzaba con la exportación genérica de `@prisma/client`, sin `Decimal`, `InputJsonValue`, errores conocidos ni tipos de modelos.
+
+#### Solución
+
+- CI ejecuta explícitamente `pnpm db:generate` inmediatamente después de `pnpm install --frozen-lockfile`.
+- `@finanzas/api` declara `precheck` y `prebuild`, por lo que tanto una comprobación directa como cualquier build local o Docker generan el cliente antes de `tsc`.
+- El Dockerfile usa el contrato `prebuild` del paquete y no mantiene una segunda secuencia de generación exclusiva del contenedor.
+- La repetición entre el paso explícito de CI y los hooks es intencional: `prisma generate` es determinístico e idempotente; el primero hace visible el prerrequisito del pipeline y los segundos protegen comandos directos fuera de CI.
+
+#### Invariantes
+
+- No se relajó `strict`/`noImplicitAny`, no se añadieron `any`, `@ts-ignore` o archivos generados a Git.
+- El cliente se sigue generando dentro de `node_modules`; ejecutar generación y pruebas debe conservar el árbol Git limpio.
+
 ### 2026-07-19 — Arquitectura y vertical slice inicial
 
 #### Realizado

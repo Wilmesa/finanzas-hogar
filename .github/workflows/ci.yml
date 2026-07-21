@@ -21,6 +21,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # No depender del postinstall de @prisma/client: CI parte de node_modules limpio.
+      - run: pnpm db:generate
       - run: pnpm pwa:icons && git diff --exit-code -- apps/web/static/icons
       - run: pnpm verify
       - run: test -f apps/web/build/client/service-worker.js
