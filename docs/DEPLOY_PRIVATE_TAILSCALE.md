@@ -1,6 +1,6 @@
 # Despliegue privado con Tailscale Serve
 
-Esta guía instala un entorno experimental aislado en Ubuntu Server 24.04. Tailscale termina TLS y reenvía al único puerto publicado por Compose: el gateway HTTP enlazado a `127.0.0.1`. No se abren 80/443, PostgreSQL, Redis, Keycloak, API, PWA, AI-CFO o n8n directamente en el host.
+Esta guía instala un entorno experimental aislado en Ubuntu Server 24.04. Tailscale termina TLS y reenvía al único puerto publicado por Compose: el gateway HTTP enlazado a `127.0.0.1`. Con `AUTH_MODE=local`, Keycloak y n8n no arrancan y ningún servicio interno se publica en el host.
 
 ## 1. Requisitos
 
@@ -49,7 +49,9 @@ Para este entorno de prueba configure, como mínimo:
 ```dotenv
 DEPLOY_TARGET=private
 COMPOSE_PROJECT_NAME=finanzas-hogar-dev
-APP_ORIGIN=https://servidor-hogar.tail5190d1.ts.net:8446
+AUTH_MODE=local
+PUBLIC_AUTH_MODE=local
+APP_ORIGIN=https://nombre-del-servidor.tailnet-ejemplo.ts.net:8446
 APP_LOCAL_PORT=3100
 DEV_AUTH_ENABLED=false
 ```
@@ -65,34 +67,32 @@ Para una futura producción use otro nombre, por ejemplo `finanzas-hogar-prod`, 
 Válido:
 
 ```text
-https://servidor-hogar.tail5190d1.ts.net:8446
+https://nombre-del-servidor.tailnet-ejemplo.ts.net:8446
 ```
 
 Inválidos:
 
 ```text
-http://servidor-hogar
-https://servidor-hogar/auth
+http://nombre-del-servidor
+https://nombre-del-servidor/auth
 ```
 
-La API usa el origen para CORS y para validar el issuer. Keycloak usa el mismo origen para hostname, redirect URI y web origin. Las conexiones internas siguen usando DNS Docker.
+La API usa el origen para CORS y cookies detrás del proxy confiable. Keycloak usa ese origen solo si se habilita. Las conexiones internas siguen usando DNS Docker.
 
 ## 6. Generar configuración y preflight
 
 Primer bootstrap, todavía sin PAT de Firefly:
 
 ```bash
-node scripts/configure-domain.mjs
 node scripts/preflight.mjs --bootstrap
 git status --porcelain
 ```
 
-El último comando debe quedar vacío. El realm generado vive en `runtime/keycloak/`, está ignorado por Git y tiene permisos restrictivos.
+El último comando debe quedar vacío. En modo local `configure-domain` no genera realm ni es necesario ejecutarlo.
 
 Una vez configurados los PAT, el control obligatorio es:
 
 ```bash
-node scripts/configure-domain.mjs
 node scripts/preflight.mjs
 ```
 
@@ -102,7 +102,7 @@ node scripts/preflight.mjs
 DEPLOY_TARGET=private scripts/deploy.sh --bootstrap
 ```
 
-El script valida configuración, construye imágenes propias, inicia dependencias con healthchecks, ejecuta migraciones Prisma, sincroniza el cliente OIDC e inicia API, PWA y gateway. No inicia el n8n incluido.
+El script valida configuración, construye imágenes propias, inicia dependencias con healthchecks, ejecuta migraciones Prisma e inicia API, PWA y gateway. No descarga ni inicia Keycloak o n8n.
 
 Compruebe que solamente el gateway está publicado:
 
@@ -121,28 +121,24 @@ sudo tailscale serve --bg --https=8446 http://127.0.0.1:3100
 sudo tailscale serve status
 ```
 
-Tailscale termina HTTPS y Caddy conserva el mismo origen para `/`, `/api/*` y `/auth/*`. No configure Funnel y no abra 80/443 en UFW. Consulte la [referencia actual de Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve).
+Tailscale termina HTTPS y Caddy conserva el mismo origen para `/` y `/api/*`. En modo local no existe `/auth`. No configure Funnel y no abra 80/443 en UFW.
 
-## 9. Configuración inicial de Keycloak
+## 9. Crear o restablecer los dos usuarios locales
 
-Abra desde un dispositivo del tailnet:
-
-```text
-https://servidor-hogar.tail5190d1.ts.net:8446/auth/admin/
-```
-
-1. Ingrese al realm `finanzas` con el administrador de `.env`.
-2. Cree dos usuarios y exija `VERIFY_EMAIL`, `UPDATE_PASSWORD` y `CONFIGURE_TOTP`.
-3. Configure `household_id` con el mismo UUID/ID para ambos.
-4. Configure `household_role` como `owner` y `member`.
-5. Copie el `sub`/ID interno de cada usuario a `MEMBER_A_ID` y `MEMBER_B_ID` en `.env`.
-6. Ejecute nuevamente `scripts/deploy.sh` para sincronizar y después el seed una sola vez:
+Revise `MEMBER_A/B_ID`, nombre, correo y `MEMBER_A/B_USERNAME` en `.env`. Después ejecute por SSH:
 
 ```bash
-scripts/compose.sh run --rm api pnpm --filter @finanzas/api prisma:seed
+scripts/bootstrap-local-users.sh
 ```
 
-No active `DEV_AUTH_ENABLED`.
+El script solicita ambas contraseñas sin mostrarlas, exige 12–128 caracteres y es idempotente. Si el usuario ya existe, reemplaza su hash e invalida todas sus sesiones. Para automatización puntual admite `MEMBER_A_BOOTSTRAP_PASSWORD` y `MEMBER_B_BOOTSTRAP_PASSWORD` como variables temporales del proceso; elimínelas del shell inmediatamente y nunca las escriba en `.env` o Git. No active `DEV_AUTH_ENABLED`.
+
+Para restablecer únicamente una contraseña desde SSH, sin tocar la otra:
+
+```bash
+LOCAL_USER_LABEL=A scripts/bootstrap-local-users.sh
+# o LOCAL_USER_LABEL=B
+```
 
 ## 10. Configuración inicial de Firefly
 
@@ -182,7 +178,7 @@ sudo ss -lntp | grep 8081 && echo "REVISAR: el puerto temporal sigue activo" || 
 
 Use cantidades pequeñas y ficticias:
 
-1. Iniciar sesión con MFA desde ambos usuarios.
+1. Iniciar y cerrar sesión desde ambos usuarios y cambiar una contraseña de prueba.
 2. Crear un bolsillo compartido y comprobar visibilidad mutua.
 3. Crear uno privado y confirmar `404` desde el otro miembro.
 4. Registrar un gasto ficticio y comprobar doble entrada en Firefly.
@@ -191,7 +187,7 @@ Use cantidades pequeñas y ficticias:
 7. Crear una fuente de ingreso, expectativa y plan con revisión.
 8. Exportar e importar un respaldo JSON local ficticio.
 9. Instalar la PWA y reabrir una vista visitada sin conexión.
-10. Confirmar que `/api/*` y `/auth/*` no aparecen en Cache Storage.
+10. Confirmar que `/api/*` no aparece en Cache Storage y que la cookie no es visible desde JavaScript.
 
 No cargue movimientos reales hasta completar privacidad, backup y restauración.
 
@@ -213,7 +209,7 @@ La variante incluida permanece disponible solo con el perfil explícito `bundled
 
 ```bash
 scripts/compose.sh ps
-scripts/compose.sh logs --tail=100 gateway api web keycloak firefly ai-cfo
+scripts/compose.sh logs --tail=100 gateway api web firefly ai-cfo
 scripts/compose.sh logs -f api
 docker inspect --format '{{json .State.Health}}' finanzas-hogar-dev-api-1
 ```
@@ -225,7 +221,6 @@ No copie logs con tokens o datos financieros a servicios públicos.
 ```bash
 curl -fsS http://127.0.0.1:3100/healthz
 curl -fsS http://127.0.0.1:3100/api/health
-curl -fsS "https://servidor-hogar.tail5190d1.ts.net:8446/auth/realms/finanzas/.well-known/openid-configuration" >/dev/null
 scripts/compose.sh ps
 ```
 
@@ -261,9 +256,8 @@ cat runtime/deploy/last-update.env
 Después, en ventana de mantenimiento:
 
 ```bash
-scripts/compose.sh stop gateway api web keycloak firefly ai-cfo
+scripts/compose.sh stop gateway api web firefly ai-cfo
 git switch --detach <PREVIOUS_COMMIT>
-node scripts/configure-domain.mjs
 DEPLOY_TARGET=private scripts/deploy.sh
 RESTORE_CONFIRM=SI_RESTAURAR scripts/restore.sh <BACKUP_PATH>
 ```
@@ -279,12 +273,45 @@ Use una ruta, `COMPOSE_PROJECT_NAME`, `.env`, origen y backups independientes. P
 Solo para otro servidor preparado para Internet:
 
 ```bash
-DEPLOY_TARGET=public scripts/deploy.sh
+DEPLOY_TARGET=public AUTH_MODE=keycloak PUBLIC_AUTH_MODE=keycloak scripts/deploy.sh
 ```
 
 Ese target usa `docker-compose.public.yml` y publica 80/443 mediante Caddy. No lo ejecute en este servidor privado.
 
-## 20. Eliminación segura del entorno de pruebas
+## 20. Migrar el primer despliegue fallido de Keycloak a autenticación local
+
+No se necesita borrar PostgreSQL ni Firefly. Desde la ruta del clon:
+
+```bash
+# 1. Detener sin borrar volúmenes
+scripts/compose.sh down
+
+# 2. Actualizar por avance lineal
+git switch main
+git pull --ff-only
+
+# 3. Editar .env
+# AUTH_MODE=local
+# PUBLIC_AUTH_MODE=local
+# DEV_AUTH_ENABLED=false
+
+# 4. Reconstruir, migrar e iniciar el núcleo local
+DEPLOY_TARGET=private AUTH_MODE=local scripts/deploy.sh --bootstrap
+
+# 5. Crear o restablecer las dos credenciales
+scripts/bootstrap-local-users.sh
+
+# 6. Confirmar topología y login desde la URL Tailscale
+scripts/compose.sh ps
+```
+
+`ps` debe mostrar `postgres`, `redis`, `firefly`, `ai-cfo`, `api`, `web` y `gateway`, pero no Keycloak/n8n. Después de validar login, el contenedor antiguo puede eliminarse específicamente con `docker rm <nombre-exacto-keycloak>` si aún existe detenido. Este proyecto no usa un volumen Keycloak dedicado: su base opcional está dentro del volumen PostgreSQL compartido, por lo que **no se debe borrar ese volumen**. Si más adelante se desea retirar únicamente la base `keycloak`, hágalo mediante SQL tras backup, inspección y confirmación expresa; no es necesario para recuperar espacio operativo. Nunca use `docker compose down -v` en esta migración.
+
+## 21. Volver opcionalmente a Keycloak
+
+Defina `AUTH_MODE=keycloak` y `PUBLIC_AUTH_MODE=keycloak`, complete sus secretos, ejecute `node scripts/configure-domain.mjs` y después `scripts/deploy.sh`. El archivo `docker-compose.keycloak.yml` añade servicio, ruta `/auth` y dependencias; la autorización financiera sigue usando el mismo `Actor` normalizado.
+
+## 22. Eliminación segura del entorno de pruebas
 
 1. Cree y retire un último backup cifrado.
 2. Desactive solo el endpoint configurado:

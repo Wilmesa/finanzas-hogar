@@ -26,10 +26,10 @@ Defina `APP_ORIGIN` como URL HTTPS completa sin ruta. Puede incluir puerto:
 APP_ORIGIN=https://finanzas.example.internal:8446
 ```
 
-Después genere el realm runtime sin modificar archivos versionados:
+En modo local no hay realm. En modo Keycloak genere su configuración runtime sin modificar archivos versionados:
 
 ```bash
-node scripts/configure-domain.mjs
+AUTH_MODE=keycloak node scripts/configure-domain.mjs
 git status --porcelain
 ```
 
@@ -46,7 +46,7 @@ DEPLOY_TARGET=private scripts/deploy.sh
 Público tradicional, solo en un host con DNS, firewall y 80/443 aprobados:
 
 ```bash
-DEPLOY_TARGET=public scripts/deploy.sh
+DEPLOY_TARGET=public AUTH_MODE=keycloak PUBLIC_AUTH_MODE=keycloak scripts/deploy.sh
 ```
 
 Los comandos usan `scripts/compose.sh`, que combina el archivo central con el override correcto. No ejecute `docker compose up` sin seleccionar la topología documentada.
@@ -66,7 +66,7 @@ git status --porcelain
 DEPLOY_TARGET=private scripts/update-server.sh
 ```
 
-La actualización crea backup antes del pull, conserva el target, aplica migraciones y registra rollback en `runtime/deploy/last-update.env`.
+La actualización crea backup antes del pull, conserva target y `AUTH_MODE`, aplica migraciones y registra rollback en `runtime/deploy/last-update.env`. Los hashes locales están en PostgreSQL y sobreviven a reconstrucciones de imagen.
 
 ## Restaurar
 
@@ -80,4 +80,4 @@ Use primero un entorno aislado. No habilite escrituras hasta verificar balances 
 
 ## Compatibilidad
 
-Firefly sigue siendo el libro contable y PostgreSQL la fuente de bolsillos/planes. La migración de infraestructura no cambia contratos REST, esquema Prisma, PWA, OIDC/PKCE, privacidad ni cálculos. El n8n incluido es opcional y el workflow permanece versionado para importación en un n8n externo.
+Firefly sigue siendo el libro contable y PostgreSQL la fuente de bolsillos/planes y usuarios locales. La migración no cambia privacidad ni cálculos. La sesión Redis puede expirar durante una restauración; basta iniciar sesión de nuevo. Keycloak y n8n permanecen opcionales.

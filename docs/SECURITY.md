@@ -3,9 +3,9 @@
 ## Antes de usar datos reales
 
 - Cambiar todas las credenciales incluidas como valores locales.
-- Configurar MFA en Keycloak para ambos miembros.
+- Crear ambos usuarios locales mediante el script interactivo; Keycloak/MFA solo aplica al modo opcional.
 - Mantener `DEV_AUTH_ENABLED=false` en cualquier servidor accesible por red.
-- Restringir los redirect URI de Keycloak al dominio exacto.
+- Si se habilita Keycloak, restringir sus redirect URI al dominio exacto.
 - Almacenar PAT de Firefly y claves LLM cifradas; nunca enviarlas al navegador o n8n.
 - En modo privado, no abrir 80/443 y publicar solo el gateway en loopback mediante Tailscale Serve. En modo público opcional, exponer únicamente 80/443 mediante Caddy.
 - Crear copias cifradas y ejecutar una restauración de prueba.
@@ -23,6 +23,15 @@
 
 Los snapshots de revisión se autorizan siempre a través del plan padre. Nunca se incorporan a un análisis compartido cuando el plan es privado.
 
+## Autenticación local privada
+
+- scrypt de Node (`N=65536`, `r=8`, `p=1`, salt aleatorio de 32 bytes) evita contraseñas reversibles y dependencias nativas adicionales.
+- La cookie `finanzas_session` es `HttpOnly`, `Secure`, `SameSite=Strict` y `Path=/`. Strict es compatible porque PWA y API comparten origen y reduce envíos cross-site.
+- El valor de cookie es aleatorio; Redis guarda la sesión con TTL (12 horas por defecto). Cerrar sesión la elimina y cambiar/restablecer contraseña incrementa su versión y revoca todas las sesiones del miembro.
+- Las mutaciones requieren el token CSRF retornado por `/v1/auth/me`; permanece únicamente en memoria de la PWA. Contraseñas y cookie no se guardan en `localStorage` ni `sessionStorage`.
+- Los intentos se limitan por hash de identificador e IP; los errores de usuario ausente, deshabilitado o contraseña incorrecta son deliberadamente genéricos.
+- Tailscale cifra el transporte, limita quién alcanza el gateway y termina HTTPS. No corrige contraseñas débiles, equipos comprometidos, permisos Docker, backups sin cifrar ni un administrador con acceso directo a PostgreSQL.
+
 ## Modelo de amenaza resumido
 
 | Riesgo                             | Control actual                                                   |
@@ -35,7 +44,9 @@ Los snapshots de revisión se autorizan siempre a través del plan padre. Nunca 
 | Recordatorios reveladores          | Web Push genérico, sin montos, comercios ni nombres de bolsillos |
 | Puertos internos expuestos         | Compose privado solo enlaza gateway a 127.0.0.1                  |
 | Secretos conocidos                 | Interpolación obligatoria, init criptográfico y preflight        |
+| Fuerza bruta de login local        | Límite Redis por identificador/IP y mensaje genérico             |
+| CSRF con cookie local              | SameSite Strict y token CSRF para toda mutación                  |
 
-Los servicios usan dos redes: `edge` para gateway/web/API/Keycloak y `backend` para datos y servicios internos. PostgreSQL y Redis no publican puertos. Los logs Docker rotan a tres archivos de 10 MB. No se aplicaron `read_only`, `cap_drop` o límites rígidos a imágenes de terceros sin una prueba integrada en Docker; hacerlo por intuición puede impedir migraciones, uploads o arranque de identidad.
+Los servicios usan dos redes: `edge` para gateway/web/API y `backend` para datos y servicios internos. Keycloak se incorpora a ambas solo en su modo. PostgreSQL y Redis no publican puertos. Los logs Docker rotan a tres archivos de 10 MB.
 
 Antes de una oferta SaaS se requieren pentest, RLS forzado, rotación automatizada de secretos, auditoría de accesos, análisis de dependencias, plan de incidentes y cumplimiento formal de la Ley 1581.

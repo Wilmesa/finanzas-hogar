@@ -19,14 +19,13 @@ Firefly es la fuente canónica de movimientos reales. PostgreSQL es la fuente ca
 
 ## Topologías de despliegue
 
-`docker-compose.yml` no publica puertos y define servicios, redes y volúmenes centrales. `docker-compose.private.yml` añade un gateway HTTP enlazado exclusivamente a `127.0.0.1`, pensado para TLS terminado por Tailscale. `docker-compose.public.yml` añade Caddy con 80/443 solo cuando se selecciona explícitamente `DEPLOY_TARGET=public`. El n8n incluido pertenece al perfil `bundled-n8n` y no arranca por defecto.
+`docker-compose.yml` no publica puertos y define el núcleo sin proveedor de identidad pesado. `docker-compose.private.yml` añade un gateway HTTP enlazado exclusivamente a `127.0.0.1`, pensado para TLS terminado por Tailscale. `docker-compose.public.yml` añade Caddy con 80/443. `docker-compose.keycloak.yml` se combina únicamente con `AUTH_MODE=keycloak`. El n8n incluido pertenece al perfil `bundled-n8n` y no arranca por defecto.
 
 ```mermaid
 flowchart LR
   TS["Tailscale Serve HTTPS"] -->|"127.0.0.1:3100 HTTP"| GW["Gateway Caddy"]
   GW --> WEB["PWA"]
   GW --> API["API"]
-  GW --> KC["Keycloak"]
   API --> PG["PostgreSQL"]
   API --> REDIS["Redis"]
   API --> FF["Firefly"]
@@ -34,6 +33,12 @@ flowchart LR
 ```
 
 `APP_ORIGIN` conserva esquema, hostname y puerto externo; las rutas internas usan DNS Compose. `COMPOSE_PROJECT_NAME` separa completamente dev y producción.
+
+## Límite de autenticación
+
+Los controladores financieros reciben siempre un `Actor` normalizado (`id`, `email`, `householdMemberId`, `householdId`, roles y proveedor). Un único guard resuelve ese actor desde una sesión local o un JWT Keycloak; la autorización de bolsillos y hogar no conoce el proveedor.
+
+En modo local, `LocalUser` es una relación uno a uno con `Member`, no un segundo modelo de hogar. La contraseña usa scrypt con salt aleatorio; Redis conserva únicamente sesiones opacas con TTL, versión de contraseña y token CSRF. PostgreSQL conserva credenciales hash y Redis permite revocación inmediata. En modo Keycloak se mantiene la verificación JWKS y el flujo PKCE existente.
 
 ## Planificación financiera
 

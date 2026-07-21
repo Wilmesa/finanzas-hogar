@@ -4,11 +4,11 @@ Aplicación self-hosted de finanzas personales y de pareja. Firefly III conserva
 
 ## Estado de esta entrega
 
-El repositorio contiene una **beta funcional y desplegable** de la Fase 1. Tiene dos modos: `local`, para probar la experiencia completa sin infraestructura, y `server`, para utilizar Keycloak, PostgreSQL y Firefly:
+El repositorio contiene una **beta funcional y desplegable** de la Fase 1. `PUBLIC_DATA_MODE=local` permite una demostración sin infraestructura y `server` usa PostgreSQL/Firefly. La autenticación integrada admite `AUTH_MODE=local` (predeterminado privado) o `keycloak` (opcional/público):
 
 - PWA responsive e instalable en SvelteKit con las vistas Hoy, Bolsillos, Movimientos, Futuro y Más.
 - Service worker con caché de interfaz y navegación visitada; API financiera y autenticación siempre quedan fuera de caché.
-- API NestJS/Fastify con autenticación OIDC o identidad de desarrollo.
+- API NestJS/Fastify con identidad normalizada, sesiones locales opacas en Redis u OIDC/PKCE opcional.
 - PostgreSQL/Prisma con hogares, miembros, bolsillos, eventos, reglas, atribuciones, check-ins e insights.
 - Bolsillos compartidos por defecto y privados para su propietario.
 - Metas por fecha o por capacidad de aporte.
@@ -22,7 +22,7 @@ El repositorio contiene una **beta funcional y desplegable** de la Fase 1. Tiene
 - Docker Compose por target: privado Tailscale, público opcional y n8n integrado bajo perfil explícito.
 - Scripts de preflight, configuración runtime, despliegue, actualización, backup y restauración.
 
-En modo local, bolsillos, movimientos, asignaciones y ajustes se guardan en `localStorage` y pueden exportarse/importarse como JSON. En modo servidor, la PWA usa OIDC con PKCE y llama a la API; el navegador nunca recibe tokens de Firefly.
+En modo de datos local, bolsillos, movimientos, asignaciones y ajustes se guardan en `localStorage`. En modo servidor, la PWA llama a la API; con autenticación local usa una cookie `HttpOnly` y con Keycloak usa OIDC/PKCE. El navegador nunca recibe tokens de Firefly.
 
 ## Probar ahora sin Docker
 
@@ -56,14 +56,14 @@ x-member-name: Ana
 
 ## Despliegue privado recomendado
 
-El target privado publica una única entrada en `127.0.0.1:${APP_LOCAL_PORT}`. Tailscale Serve termina TLS y conserva PWA, API y Keycloak bajo el mismo origen. PostgreSQL, Redis, web, API, AI-CFO y Keycloak no publican puertos; n8n no se inicia.
+El target privado publica una única entrada en `127.0.0.1:${APP_LOCAL_PORT}`. Tailscale Serve termina TLS y conserva PWA/API bajo el mismo origen. En `AUTH_MODE=local`, PostgreSQL, Redis, Firefly, API, web y AI-CFO son internos; Keycloak y n8n no se crean ni inician.
 
 ```bash
 node scripts/init-env.mjs
 # editar .env
-node scripts/configure-domain.mjs
 node scripts/preflight.mjs
 DEPLOY_TARGET=private scripts/deploy.sh
+scripts/bootstrap-local-users.sh
 ```
 
 La instalación inicial sin PAT usa explícitamente `--bootstrap`. Consulte la guía completa antes de ejecutarla:
@@ -85,15 +85,15 @@ DEPLOY_TARGET=private scripts/deploy.sh
 
 Las actualizaciones se aplican manualmente con `DEPLOY_TARGET=private scripts/update-server.sh`. El script exige Git limpio, crea un backup consistente, registra el commit anterior, usa avance lineal, valida, migra y espera healthchecks. No hay actualizaciones automáticas.
 
-Un despliegue público tradicional requiere selección explícita:
+Un despliegue público tradicional con Keycloak requiere selección explícita:
 
 ```bash
-DEPLOY_TARGET=public scripts/deploy.sh
+DEPLOY_TARGET=public AUTH_MODE=keycloak PUBLIC_AUTH_MODE=keycloak scripts/deploy.sh
 ```
 
 El n8n incluido solo existe para instalaciones independientes y requiere el perfil `bundled-n8n`; el entorno privado previsto usa el n8n externo del servidor.
 
-El stack fija Firefly `6.6.3`, Keycloak `26.6.3` y n8n `2.29.11`. Antes de cualquier actualización se debe crear un backup y repetir las pruebas de aceptación.
+El stack fija Firefly `6.6.3`; Keycloak `26.6.3` y n8n `2.29.11` solo se usan de forma explícita. Antes de cualquier actualización se debe crear un backup y repetir las pruebas de aceptación.
 
 ## Comandos de calidad
 
@@ -119,6 +119,7 @@ python3 -m pytest services/ai-cfo/tests -q
 - `GET/PUT /v1/reminders/preferences`: consulta y configura horarios individuales.
 - `GET /v1/push/public-key` y `POST/DELETE /v1/push/subscriptions`: registra cada dispositivo PWA.
 - `POST /v1/automation/reminders/process`: disparador opcional autenticado para n8n.
+- `POST /v1/auth/login`, `GET /v1/auth/me`, `POST /v1/auth/logout` y `POST /v1/auth/change-password`: sesión local segura.
 
 Los comandos monetarios exigen `Idempotency-Key`.
 
@@ -130,7 +131,7 @@ Los comandos monetarios exigen `Idempotency-Key`.
 - Web Push requiere instalar la PWA, conceder permiso en cada dispositivo y completar una prueba real de entrega en el servidor. En iOS se necesita una PWA añadida a la pantalla de inicio.
 - La ingesta BanRep/Alpha Vantage está implementada, pero debe verificarse con red real y ajustar el parser si BanRep modifica su feed.
 - La operación privada financiada desde el libro común requiere un outbox/saga para compensar una caída entre ambas escrituras Firefly.
-- Falta imponer RLS con un rol PostgreSQL de runtime separado y añadir pruebas E2E con Keycloak/Firefly reales.
+- Falta imponer RLS con un rol PostgreSQL de runtime separado y completar pruebas E2E contra Firefly con datos ficticios.
 - Redis/BullMQ, OpenTelemetry y los dashboards de observabilidad están previstos, pero no se activan todavía en código.
 
 Consulte [la bitácora](BITACORA.md), [el módulo de planificación](docs/PLANNING.md), [la migración](docs/MIGRATION.md), [la arquitectura](docs/ARCHITECTURE.md) y [la seguridad](docs/SECURITY.md) antes de cargar información financiera real.
