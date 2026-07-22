@@ -48,6 +48,10 @@ const paymentInput = z.object({
   notes: z.string().trim().max(1000).optional(),
 });
 const paymentPatch = paymentInput.partial().extend({
+  totalAmount: money.nullable().optional(),
+  paymentUrl: safeUrl.nullable().optional(),
+  reference: z.string().trim().max(160).nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
   status: z.enum(["active", "completed", "archived"]).optional(),
 });
 const occurrenceInput = z.object({
@@ -60,6 +64,32 @@ const paidInput = z.object({
   sourcePocketId: z.string().uuid().optional(),
   note: z.string().trim().max(500).optional(),
 });
+
+function nextRecurringDate(
+  dueDate: Date,
+  recurrence: string,
+  dueDay: number | null,
+): Date | null {
+  const next = new Date(dueDate);
+  if (recurrence === "weekly") next.setUTCDate(next.getUTCDate() + 7);
+  else if (recurrence === "biweekly") next.setUTCDate(next.getUTCDate() + 14);
+  else if (
+    recurrence === "monthly" ||
+    recurrence === "quarterly" ||
+    recurrence === "annual"
+  ) {
+    const months =
+      recurrence === "monthly" ? 1 : recurrence === "quarterly" ? 3 : 12;
+    const desiredDay = dueDay ?? next.getUTCDate();
+    next.setUTCDate(1);
+    next.setUTCMonth(next.getUTCMonth() + months);
+    const lastDay = new Date(
+      Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0),
+    ).getUTCDate();
+    next.setUTCDate(Math.min(desiredDay, lastDay));
+  } else return null;
+  return next;
+}
 
 @Injectable()
 export class PaymentsService {
@@ -165,15 +195,19 @@ export class PaymentsService {
           : {}),
         ...(input.dueDay !== undefined ? { dueDay: input.dueDay } : {}),
         ...(input.paymentUrl !== undefined
-          ? { paymentUrl: input.paymentUrl }
+          ? { paymentUrl: input.paymentUrl ?? null }
           : {}),
         ...(input.reference !== undefined
-          ? { reference: input.reference }
+          ? { reference: input.reference ?? null }
           : {}),
-        ...(input.notes !== undefined ? { notes: input.notes } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes ?? null } : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
         ...(input.totalAmount !== undefined
-          ? { totalAmount: new Prisma.Decimal(input.totalAmount) }
+          ? {
+              totalAmount: input.totalAmount
+                ? new Prisma.Decimal(input.totalAmount)
+                : null,
+            }
           : {}),
         ...(input.estimatedAmount !== undefined
           ? { estimatedAmount: new Prisma.Decimal(input.estimatedAmount) }
@@ -185,28 +219,47 @@ export class PaymentsService {
       include: { occurrences: { orderBy: { dueDate: "asc" } } },
     });
     if (input.nextDueDate) {
-      await this.prisma.paymentOccurrence.upsert({
-        where: {
-          paymentPlanId_dueDate: {
+      const nextDate = new Date(`${input.nextDueDate}T00:00:00Z`);
+      const previousDate = existing.nextDueDate;
+      const moved =
+        previousDate && previousDate.getTime() !== nextDate.getTime()
+          ? await this.prisma.paymentOccurrence.updateMany({
+              where: {
+                paymentPlanId: id,
+                dueDate: previousDate,
+                status: "planned",
+              },
+              data: {
+                dueDate: nextDate,
+                ...(input.estimatedAmount !== undefined
+                  ? { plannedAmount: new Prisma.Decimal(input.estimatedAmount) }
+                  : {}),
+              },
+            })
+          : { count: 0 };
+      if (moved.count === 0)
+        await this.prisma.paymentOccurrence.upsert({
+          where: {
+            paymentPlanId_dueDate: {
+              paymentPlanId: id,
+              dueDate: nextDate,
+            },
+          },
+          create: {
+            householdId: actor.householdId,
             paymentPlanId: id,
             dueDate: new Date(`${input.nextDueDate}T00:00:00Z`),
+            plannedAmount:
+              input.estimatedAmount !== undefined
+                ? new Prisma.Decimal(input.estimatedAmount)
+                : existing.estimatedAmount,
           },
-        },
-        create: {
-          householdId: actor.householdId,
-          paymentPlanId: id,
-          dueDate: new Date(`${input.nextDueDate}T00:00:00Z`),
-          plannedAmount:
-            input.estimatedAmount !== undefined
-              ? new Prisma.Decimal(input.estimatedAmount)
-              : existing.estimatedAmount,
-        },
-        update: {
-          ...(input.estimatedAmount !== undefined
-            ? { plannedAmount: new Prisma.Decimal(input.estimatedAmount) }
-            : {}),
-        },
-      });
+          update: {
+            ...(input.estimatedAmount !== undefined
+              ? { plannedAmount: new Prisma.Decimal(input.estimatedAmount) }
+              : {}),
+          },
+        });
     }
     return this.find(id, actor);
   }
@@ -279,15 +332,57 @@ export class PaymentsService {
       )
         throw new NotFoundException();
     }
-    return this.prisma.paymentOccurrence.update({
-      where: { id: occurrenceId },
-      data: {
-        status: "paid",
-        paidAt: new Date(),
-        actualAmount: new Prisma.Decimal(parsed.data.actualAmount),
-        sourcePocketId: parsed.data.sourcePocketId ?? null,
-        note: parsed.data.note ?? null,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.paymentOccurrence.update({
+        where: { id: occurrenceId },
+        data: {
+          status: "paid",
+          paidAt: new Date(),
+          actualAmount: new Prisma.Decimal(parsed.data.actualAmount),
+          sourcePocketId: parsed.data.sourcePocketId ?? null,
+          note: parsed.data.note ?? null,
+        },
+      });
+      let next = await tx.paymentOccurrence.findFirst({
+        where: { paymentPlanId: occurrence.paymentPlanId, status: "planned" },
+        orderBy: { dueDate: "asc" },
+      });
+      if (!next) {
+        const generatedDate = nextRecurringDate(
+          occurrence.dueDate,
+          occurrence.paymentPlan.recurrence,
+          occurrence.paymentPlan.dueDay,
+        );
+        if (generatedDate) {
+          next = await tx.paymentOccurrence.upsert({
+            where: {
+              paymentPlanId_dueDate: {
+                paymentPlanId: occurrence.paymentPlanId,
+                dueDate: generatedDate,
+              },
+            },
+            create: {
+              householdId: actor.householdId,
+              paymentPlanId: occurrence.paymentPlanId,
+              dueDate: generatedDate,
+              plannedAmount: occurrence.paymentPlan.estimatedAmount,
+            },
+            update: {},
+          });
+        }
+      }
+      await tx.paymentPlan.update({
+        where: { id: occurrence.paymentPlanId },
+        data: {
+          nextDueDate: next?.dueDate ?? null,
+          ...(next
+            ? { status: "active" }
+            : occurrence.paymentPlan.recurrence === "once"
+              ? { status: "completed" }
+              : {}),
+        },
+      });
+      return updated;
     });
   }
 

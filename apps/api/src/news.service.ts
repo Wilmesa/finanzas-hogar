@@ -58,6 +58,9 @@ export class NewsService {
   }
 
   async refresh() {
+    const regionalQuery = (
+      process.env.NEWS_REGION_QUERY ?? "economía regional Colombia"
+    ).trim();
     const feeds = [
       {
         source: "Banco de la República",
@@ -68,15 +71,18 @@ export class NewsService {
             ["colombia", "economía", "tasas"],
           ),
       },
-      {
-        source: "DANE",
-        load: () =>
-          this.fetchRss(
-            "DANE",
-            "https://www.dane.gov.co/index.php?option=com_rss&feed=RSS1.0&no_html=1",
-            ["colombia", "inflación", "empleo"],
-          ),
-      },
+      this.googleNewsFeed("Economía Colombia", "economía Colombia", [
+        "colombia",
+        "economía",
+      ]),
+      this.googleNewsFeed("Economía regional", regionalQuery, [
+        "regional",
+        "economía",
+      ]),
+      this.googleNewsFeed("Economía mundial", "economía mundial", [
+        "mundo",
+        "mercados",
+      ]),
       ...this.configuredFeeds(),
     ];
     const results = await Promise.allSettled([
@@ -141,6 +147,19 @@ export class NewsService {
       });
   }
 
+  private googleNewsFeed(source: string, query: string, topics: string[]) {
+    const url = new URL("https://news.google.com/rss/search");
+    url.searchParams.set("q", query);
+    url.searchParams.set("hl", "es-419");
+    url.searchParams.set("gl", "CO");
+    url.searchParams.set("ceid", "CO:es-419");
+    return {
+      source: `Google News · ${source}`,
+      load: () =>
+        this.fetchRss(`Google News · ${source}`, url.toString(), topics),
+    };
+  }
+
   private async fetchRss(
     source: string,
     url: string,
@@ -153,7 +172,7 @@ export class NewsService {
     if (!response.ok)
       throw new Error(`${source} respondió HTTP ${response.status}`);
     const xml = await response.text();
-    return [...xml.matchAll(/<item[^>]*>([\s\S]*?)<\/item>/gi)]
+    const articles = [...xml.matchAll(/<item[^>]*>([\s\S]*?)<\/item>/gi)]
       .slice(0, 15)
       .map((match) => {
         const item = match[1] ?? "";
@@ -170,6 +189,10 @@ export class NewsService {
       .filter((item): item is NormalizedNews =>
         Boolean(item.sourceUrl && item.title && item.publishedAt),
       );
+    if (articles.length === 0) {
+      throw new Error(`${source} no entregó artículos RSS válidos`);
+    }
+    return articles;
   }
 
   private async fetchAlphaVantage(): Promise<NormalizedNews[]> {

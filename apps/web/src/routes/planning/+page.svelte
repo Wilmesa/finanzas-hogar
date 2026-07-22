@@ -37,6 +37,8 @@
   let editingSourceId = $state<string | null>(null);
   let editingIncomeId = $state<string | null>(null);
   let editingPlanId = $state<string | null>(null);
+  let actionId = $state<string | null>(null);
+  let showCancelledIncomes = $state(false);
   let paymentDestinations = $state<Array<{ id: string; name: string; visibility: "household" | "private"; currency: string }>>([]);
 
   onMount(async () => {
@@ -80,13 +82,22 @@
   const sharedExpected = $derived(
     $financeData.expectedIncomes.reduce(
       (sum, item) =>
-        item.status === "cancelled" ? sum : sum + item.expectedAmount * item.probability,
+        item.status === "cancelled" || item.status === "received"
+          ? sum
+          : sum + item.expectedAmount * item.probability,
       0,
     ),
+  );
+  const activeExpectedIncomes = $derived(
+    $financeData.expectedIncomes.filter((income) => income.status !== "cancelled"),
+  );
+  const cancelledIncomes = $derived(
+    $financeData.expectedIncomes.filter((income) => income.status === "cancelled"),
   );
   const unplannedIncomes = $derived(
     $financeData.expectedIncomes.filter(
       (income) =>
+        income.status !== "cancelled" &&
         !$financeData.fundingPlans.some((plan) =>
           plan.allocations.some(
             (allocation) => allocation.expectedIncomeId === income.id,
@@ -276,14 +287,24 @@
 
   async function removeSource(source: IncomeSourceView) {
     if (!confirm(`¿Desactivar la fuente “${source.name}”? Los ingresos ya creados conservarán su historia.`)) return;
-    await archiveIncomeSource(source.id);
-    success = "Fuente desactivada. El historial permanece disponible.";
+    actionId = source.id; error = "";
+    try {
+      await archiveIncomeSource(source.id);
+      success = "Fuente desactivada. El historial permanece disponible.";
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible desactivar la fuente";
+    } finally { actionId = null; }
   }
 
   async function cancelIncome(income: ExpectedIncomeView) {
-    if (!confirm(`¿Cancelar el ingreso esperado de ${income.sourceName}?`)) return;
-    await cancelExpectedIncome(income.id);
-    success = "Ingreso esperado cancelado sin borrar su trazabilidad.";
+    if (!confirm(`¿Cancelar y retirar de las proyecciones activas el ingreso esperado de ${income.sourceName}?`)) return;
+    actionId = income.id; error = "";
+    try {
+      await cancelExpectedIncome(income.id);
+      success = "Ingreso cancelado y retirado de las proyecciones activas. Puedes consultarlo en el historial.";
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible cancelar el ingreso";
+    } finally { actionId = null; }
   }
 
   async function savePlan() {
@@ -353,7 +374,7 @@
     planTargetDate = plan.targetDate ?? "";
     planIncomeId = plan.allocations[0]?.expectedIncomeId ?? "";
     decisionNote = "Actualización del acuerdo: ";
-    allocationDrafts = plan.allocations.filter((item) => item.pocketId).map((item) => ({
+    allocationDrafts = plan.allocations.filter((item) => item.pocketId || item.paymentPlanId).map((item) => ({
       pocketId: item.paymentPlanId ? `payment:${item.paymentPlanId}` : item.pocketId ?? "",
       mode: item.mode,
       value: item.mode === "percentage" ? (item.value ?? 0) * 100 : item.value,
@@ -364,8 +385,13 @@
 
   async function removePlan(plan: FundingPlanView) {
     if (!confirm(`¿Archivar “${plan.title}”? Su historial y auditoría se conservarán.`)) return;
-    await archiveFundingPlan(plan.id);
-    success = "Plan archivado sin borrar su trazabilidad.";
+    actionId = plan.id; error = "";
+    try {
+      await archiveFundingPlan(plan.id);
+      success = "Plan retirado de los acuerdos activos. Su auditoría permanece conservada.";
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible archivar el plan";
+    } finally { actionId = null; }
   }
 
   async function executeAllocation(allocation: FundingPlanView["allocations"][number]) {
@@ -424,7 +450,7 @@
       <h1>Plan financiero</h1>
       <p>Recuerda qué ingreso llegará, para qué existe y qué decidieron hacer con él.</p>
     </div>
-    <a class="secondary-link" href="/future">Abrir simuladores →</a>
+    <div class="page-header-actions"><a class="secondary-link" href="/payments">Ver pagos</a><a class="secondary-link" href="/future">Abrir simuladores →</a></div>
   </header>
 
   <section class="planning-hero">
@@ -509,24 +535,25 @@
       {#each $financeData.incomeSources as source}
         <article class="panel source-card">
           <div><span class="privacy">{source.visibility === "private" ? "Solo yo" : "Compartida"}</span><h3>{source.name}</h3><p>{source.description ?? source.kind}</p><small>{source.recurrence} · {source.currency}{source.updatedAt ? ` · editada ${new Date(source.updatedAt).toLocaleDateString("es-CO")}` : ""}</small></div>
-          <div class="row-actions"><button onclick={() => editSource(source)}>Editar</button><button class="danger-text" onclick={() => removeSource(source)}>Desactivar</button></div>
+          <div class="row-actions"><button onclick={() => editSource(source)}>Editar</button><button class="danger-text" disabled={actionId === source.id} onclick={() => removeSource(source)}>{actionId === source.id ? "Desactivando…" : "Desactivar"}</button></div>
         </article>
       {/each}
     </div>
   </section>
 
   <section class="section-block">
-    <header class="section-heading"><div><span class="eyebrow">Calendario de liquidez</span><h2>Lo que viene</h2></div></header>
+    <header class="section-heading"><div><span class="eyebrow">Calendario de liquidez</span><h2>Lo que viene</h2></div>{#if cancelledIncomes.length}<button class="text-button" onclick={() => (showCancelledIncomes = !showCancelledIncomes)}>{showCancelledIncomes ? "Ocultar cancelados" : `Ver cancelados (${cancelledIncomes.length})`}</button>{/if}</header>
     <div class="income-timeline">
-      {#each $financeData.expectedIncomes as income}
+      {#each activeExpectedIncomes as income}
         <article class="income-card">
           <div class="timeline-dot"></div>
           <div><span class="eyebrow">{bucketLabels[income.timeBucket]} · {income.expectedDate}</span><h3>{income.sourceName}</h3><p>{income.reason}</p>{#if income.notes}<small>{income.notes}</small>{/if}</div>
-          <div class="income-number"><strong>{currency(income.expectedAmount, income.currency)}</strong><span class={`status ${income.status}`}>{income.status === "confirmed" ? "Confirmado" : income.status === "received" ? "Recibido" : income.status === "cancelled" ? "Cancelado" : "Estimado"} · {Math.round(income.probability * 100)}%</span><small>{income.updatedAt ? `Editado ${new Date(income.updatedAt).toLocaleDateString("es-CO")}` : "Guardado"}</small><div class="row-actions"><button onclick={() => editIncome(income)}>Editar</button>{#if income.status !== "received" && income.status !== "cancelled"}<button class="danger-text" onclick={() => cancelIncome(income)}>Cancelar</button>{/if}</div></div>
+          <div class="income-number"><strong>{currency(income.expectedAmount, income.currency)}</strong><span class={`status ${income.status}`}>{income.status === "confirmed" ? "Confirmado" : income.status === "received" ? "Recibido" : "Estimado"} · {Math.round(income.probability * 100)}%</span><small>{income.updatedAt ? `Editado ${new Date(income.updatedAt).toLocaleDateString("es-CO")}` : "Guardado"}</small><div class="row-actions"><button onclick={() => editIncome(income)}>Editar</button>{#if income.status !== "received"}<button class="danger-text" disabled={actionId === income.id} onclick={() => cancelIncome(income)}>{actionId === income.id ? "Cancelando…" : "Cancelar"}</button>{/if}</div></div>
         </article>
       {/each}
-      {#if $financeData.expectedIncomes.length === 0}<p class="empty-state">Aún no hay ingresos futuros registrados.</p>{/if}
+      {#if activeExpectedIncomes.length === 0}<p class="empty-state">Aún no hay ingresos futuros activos.</p>{/if}
     </div>
+    {#if showCancelledIncomes}<div class="cancelled-history" aria-label="Ingresos cancelados">{#each cancelledIncomes as income}<article><span><strong>{income.sourceName}</strong><small>{income.expectedDate} · {income.reason}</small></span><b>{currency(income.expectedAmount, income.currency)}</b></article>{/each}</div>{/if}
   </section>
 
   <section class="section-block">
@@ -539,7 +566,7 @@
           <div class="plan-destinations">
             {#each plan.allocations as allocation}<div><span>{allocation.sourceName} → <b>{allocation.pocketName}</b></span><strong>{allocation.mode === "fixed" ? currency(allocation.value ?? 0, plan.currency) : allocation.mode === "percentage" ? `${Math.round((allocation.value ?? 0) * 100)} %` : "Remanente"}</strong><small>{allocation.rationale}</small><small>Ejecutado: {currency(allocation.executedAmount ?? 0, plan.currency)} · {allocation.status ?? "planeado"}</small>{#if $financeData.expectedIncomes.find((income) => income.id === allocation.expectedIncomeId)?.status === "received" && allocation.status !== "applied"}<button class="text-button" onclick={() => executeAllocation(allocation)}>Ejecutar total o parcial</button>{/if}</div>{/each}
           </div>
-          <div class="row-actions"><button onclick={() => editPlan(plan)}>Editar destinos</button><button class="primary-button subtle" onclick={() => toggleHistory(plan)}>{expandedPlanId === plan.id ? "Ocultar historia" : "Revisar acuerdo"}</button><button class="danger-text" onclick={() => removePlan(plan)}>Archivar</button></div>
+          <div class="row-actions"><button onclick={() => editPlan(plan)}>Editar plan y destinos</button><button class="primary-button subtle" onclick={() => toggleHistory(plan)}>{expandedPlanId === plan.id ? "Ocultar historia" : "Revisar acuerdo"}</button><button class="danger-text" disabled={actionId === plan.id} onclick={() => removePlan(plan)}>{actionId === plan.id ? "Archivando…" : "Archivar"}</button></div>
           {#if expandedPlanId === plan.id}
             <div class="decision-history">
               {#each plan.revisions as revision}<div><span>v{revision.version}</span><p>{revision.decisionNote}</p><small>{revision.actorName ?? "Miembro"} · {new Date(revision.createdAt).toLocaleString("es-CO")}</small></div>{/each}

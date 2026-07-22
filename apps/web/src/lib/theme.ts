@@ -1,5 +1,5 @@
 import { browser } from "$app/environment";
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 
 export type ThemePreference = "light" | "dark" | "system";
 
@@ -12,6 +12,7 @@ const initial = browser
   : "system";
 
 export const themePreference = writable<ThemePreference>(initial);
+export const resolvedTheme = writable<"light" | "dark">("light");
 
 export function applyTheme(preference: ThemePreference): void {
   if (!browser) return;
@@ -20,9 +21,15 @@ export function applyTheme(preference: ThemePreference): void {
     (preference === "system" &&
       matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
+  resolvedTheme.set(dark ? "dark" : "light");
   document
     .querySelector('meta[name="theme-color"]')
     ?.setAttribute("content", dark ? "#0D1B2A" : "#123C69");
+}
+
+export function toggleTheme(): void {
+  const current = get(resolvedTheme);
+  themePreference.set(current === "dark" ? "light" : "dark");
 }
 
 if (browser) {

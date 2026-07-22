@@ -873,8 +873,8 @@ export class AiCfoController {
     const result = await this.prisma.chatMessage.deleteMany({
       where: {
         householdId: actor.householdId,
-        memberId: actor.memberId,
         scope,
+        ...(scope === "private" ? { memberId: actor.memberId } : {}),
       },
     });
     return { removed: result.count };
