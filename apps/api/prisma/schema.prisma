@@ -177,6 +177,7 @@ model Pocket {
   visibility     PocketVisibility @default(household)
   purpose        PocketPurpose
   name           String
+  notes          String?
   currency       String
   policy         Json
   currentAmount  Decimal          @default(0) @db.Decimal(30, 8)

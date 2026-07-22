@@ -61,6 +61,7 @@ export class PocketsService {
         visibility: input.visibility,
         purpose: input.purpose,
         name: input.name,
+        notes: input.notes || null,
         currency: input.currency,
         policy: input.policy as Prisma.InputJsonValue,
         currentAmount: new Prisma.Decimal(input.currentAmount),
@@ -91,6 +92,7 @@ export class PocketsService {
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.purpose !== undefined ? { purpose: input.purpose } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
         ...(input.visibility !== undefined
           ? { visibility: input.visibility }
           : {}),

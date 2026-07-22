@@ -12,7 +12,7 @@
   let filter = $state<"all" | "household" | "private">("all");
   let creating = $state(false);
   let name = $state("");
-  let purpose = $state("sinking_fund");
+  let observations = $state("");
   let targetAmount = $state<number | undefined>();
   let policyKind = $state<"target_by_date" | "target_by_contribution" | "periodic_spend">("target_by_date");
   let targetDate = $state("");
@@ -26,7 +26,7 @@
   let actionError = $state("");
   let editingPocket = $state<PocketView | null>(null);
   let editName = $state("");
-  let editPurpose = $state("");
+  let editObservations = $state("");
   let editTargetAmount = $state<number | undefined>();
   let editPolicyKind = $state<NonNullable<PocketView["policyKind"]>>("target_by_date");
   let editTargetDate = $state("");
@@ -55,10 +55,11 @@
     saving = true;
     try {
       await createPocket({
-        name: name.trim(), purpose, visibility: privatePocket ? "private" : "household", currency: currencyCode,
+        name: name.trim(), observations: observations.trim(), visibility: privatePocket ? "private" : "household", currency: currencyCode,
         targetAmount, policyKind, targetDate: targetDate || undefined, monthlyContribution,
       });
       name = "";
+      observations = "";
       targetAmount = undefined;
       targetDate = "";
       monthlyContribution = undefined;
@@ -87,7 +88,7 @@
   function beginEdit(pocket: PocketView) {
     editingPocket = pocket;
     editName = pocket.name;
-    editPurpose = pocket.purpose;
+    editObservations = pocket.observations ?? "";
     editTargetAmount = pocket.targetAmount;
     editPolicyKind = pocket.policyKind ?? "target_by_date";
     editTargetDate = pocket.targetDate ?? "";
@@ -102,7 +103,7 @@
     try {
       await updatePocket(editingPocket, {
         name: editName.trim(),
-        purpose: editPurpose,
+        observations: editObservations.trim(),
         visibility: editPrivate ? "private" : "household",
         targetAmount: editTargetAmount,
         policyKind: editPolicyKind,
@@ -168,7 +169,7 @@
       <header><div><span class="eyebrow">Nuevo propósito</span><h2>Crea un bolsillo</h2></div><span class="privacy-default">Compartido por defecto</span></header>
       <div class="form-grid">
         <label>Nombre<input placeholder="Ej. Fondo de emergencia" bind:value={name} /></label>
-        <label>Tipo<select bind:value={purpose}><option value="sinking_fund">Ahorro</option><option value="periodic_spend">Gasto periódico</option><option value="purchase">Compra</option><option value="debt">Deuda</option><option value="investment">Inversión</option><option value="real_estate">Inmueble</option><option value="custom">Otro</option></select></label>
+        <label class="wide-field">Observaciones (opcional)<textarea bind:value={observations} maxlength="1000" placeholder="Anota para qué usarán este bolsillo o cualquier acuerdo importante"></textarea></label>
         <label>¿Cuánto necesitas?<input inputmode="decimal" type="number" min="1" placeholder="0" bind:value={targetAmount} /></label>
         <label>Moneda<select bind:value={currencyCode}><option>COP</option><option>USD</option><option>EUR</option></select></label>
         <label>¿Cómo quieres calcularlo?<select bind:value={policyKind}><option value="target_by_date">Tengo una fecha límite</option><option value="target_by_contribution">Tengo un aporte máximo</option><option value="periodic_spend">Es un límite periódico</option></select></label>
@@ -203,7 +204,7 @@
       <header><div><span class="eyebrow">Cambios trazables</span><h2 id="edit-pocket-title">Editar bolsillo</h2></div><button class="icon-button" onclick={() => (editingPocket = null)} aria-label="Cerrar">×</button></header>
       <div class="form-grid">
         <label>Nombre<input bind:value={editName} /></label>
-        <label>Tipo<select bind:value={editPurpose}><option value="daily_spend">Vida diaria</option><option value="sinking_fund">Ahorro</option><option value="purchase">Compra</option><option value="debt">Deuda</option><option value="investment">Inversión</option><option value="real_estate">Inmueble</option><option value="custom">Otro</option></select></label>
+        <label class="wide-field">Observaciones (opcional)<textarea bind:value={editObservations} maxlength="1000" placeholder="Para qué existe este bolsillo o qué acordaron"></textarea></label>
         <label>Meta o límite<input type="number" min="1" bind:value={editTargetAmount} /></label>
         <label>Regla<select bind:value={editPolicyKind}><option value="target_by_date">Meta por fecha</option><option value="target_by_contribution">Meta por aporte</option><option value="periodic_spend">Límite mensual</option></select></label>
         {#if editPolicyKind === "target_by_date"}<label>Fecha límite<input type="date" bind:value={editTargetDate} /></label>{/if}

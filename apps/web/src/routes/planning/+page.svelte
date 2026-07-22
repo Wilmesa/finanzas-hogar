@@ -512,13 +512,15 @@
         <div class="allocation-editor">
           <div class="section-heading"><div><span class="eyebrow">Asignaciones</span><h2>¿A dónde irá?</h2></div><button class="text-button" onclick={addAllocation}>＋ Otro destino</button></div>
           {#each allocationDrafts as allocation, index}
-            <div class="allocation-line">
+            <div class="allocation-line" class:remainder-row={allocation.mode === "remainder"}>
               <label>Destino<select bind:value={allocation.pocketId}><optgroup label="Bolsillos">{#each compatiblePockets as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</optgroup>{#if compatiblePayments.length}<optgroup label="Pagos programados">{#each compatiblePayments as payment}<option value={`payment:${payment.id}`}>{payment.name}</option>{/each}</optgroup>{/if}</select></label>
               <label>Regla<select bind:value={allocation.mode}><option value="fixed">Cantidad fija</option><option value="percentage">Porcentaje</option><option value="remainder">Remanente</option></select></label>
               {#if allocation.mode !== "remainder"}<label>{allocation.mode === "percentage" ? "Porcentaje (%)" : "Cantidad"}<input type="number" min="0" bind:value={allocation.value} /></label>{/if}
               <label class="allocation-reason">¿Por qué?<input bind:value={allocation.rationale} placeholder="Motivo acordado" /></label>
-              {#if allocationDrafts.length > 1}<button class="remove-line" aria-label="Eliminar destino" onclick={() => allocationDrafts.splice(index, 1)}>×</button>{/if}
-              <strong class="allocation-preview-value">{currency(preview.rows[index]?.amount ?? 0, selectedIncome?.currency ?? "COP")}</strong>
+              <div class="allocation-line-footer">
+                <strong class="allocation-preview-value">Asignación: {currency(preview.rows[index]?.amount ?? 0, selectedIncome?.currency ?? "COP")}</strong>
+                {#if allocationDrafts.length > 1}<button class="remove-line" aria-label="Eliminar destino" onclick={() => allocationDrafts.splice(index, 1)}>Eliminar destino</button>{/if}
+              </div>
             </div>
           {/each}
           <div class:danger={preview.overallocated > 0} class="plan-balance"><span>Asignado <b>{currency(preview.allocated, selectedIncome?.currency ?? "COP")}</b></span><span>Sin decidir <b>{currency(preview.unassigned, selectedIncome?.currency ?? "COP")}</b></span>{#if preview.overallocated > 0}<span>Exceso <b>{currency(preview.overallocated, selectedIncome?.currency ?? "COP")}</b></span>{/if}</div>

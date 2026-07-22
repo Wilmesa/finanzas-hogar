@@ -138,7 +138,7 @@
   }
 </script>
 
-<div class="page">
+<div class="page more-page">
   <header class="page-header"><div><span class="eyebrow">Contexto y control</span><h1>Configuración</h1><p>Hogar, apariencia, noticias, automatizaciones y respaldo.</p></div></header>
   <section class="planning-shortcuts" aria-labelledby="planning-shortcuts-title">
     <div class="section-heading"><div><span class="eyebrow">Accesos financieros</span><h2 id="planning-shortcuts-title">Planear y cumplir</h2></div></div>
