@@ -3,7 +3,7 @@
   "name": "OKLE",
   "short_name": "OKLE",
   "description": "Claridad financiera para construir el futuro en familia",
-  "start_url": "/?source=okle-pwa-v2",
+  "start_url": "/?source=okle-pwa-v3",
   "scope": "/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],

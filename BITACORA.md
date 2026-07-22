@@ -435,13 +435,13 @@ La actualización del servidor se realizará únicamente después de revisión m
 ### Implementado
 
 - Se integró el logo familiar suministrado como maestro `apps/web/static/icons/okle-master.png`; el generador Node lo convierte de forma reproducible a 192/512/maskable sin depender de utilidades del sistema.
-- El manifiesto cambió a `id=/okle` y `start_url=/?source=okle-pwa-v2`. El service worker conserva la limpieza de cachés FinNest/OKLE antiguas. Una instalación móvil anterior puede requerir desinstalar y reinstalar una vez porque Android/iOS conservan el nombre instalado.
+- El manifiesto cambió a `id=/okle`; la revisión actual usa `start_url=/?source=okle-pwa-v3`. El service worker conserva la limpieza de cachés históricas. Una instalación móvil anterior puede requerir desinstalar y reinstalar una vez porque Android/iOS conservan el nombre instalado.
 - Disponible real de portada = saldos de cuentas del alcance menos reservas activas en bolsillos de la misma moneda. Los ingresos futuros siguen excluidos hasta recibirse.
 - Planes: editar destinos y datos crea otra revisión; archivar conserva auditoría; un ingreso recibido permite ejecutar cada destino total o parcialmente con `Idempotency-Key`. Solo la parte ejecutada se vuelve reserva virtual.
 - Nuevo dominio Pagos: tipo, monto total/aproximado, frecuencia, fecha, enlace, referencia, privacidad, ocurrencias, urgencia visual y confirmación del valor real/origen. Los pagos próximos activan distintivo PWA y notificación genérica, sin revelar el nombre de pagos privados.
 - Patrimonio: posiciones CDT/CAT, acciones, fondos o dólares en app; tasa, vencimiento, bruto, costos, neto, ticker, unidades, precio/fecha/fuente. También inmuebles con sector, valoración, supuesto de apreciación y una serie histórica de cortes netos.
 - Asesor: Enter envía, Shift+Enter crea línea, se puede limpiar la conversación propia y el contexto agrega gastos por categorías y miembros anónimos. Nunca incluye nombres, números de cuenta, notas libres ni datos privados de la pareja.
-- Noticias: feed oficial BanRep en español, DANE, Alpha Vantage opcional y RSS HTTPS regionales configurables. La pantalla muestra estado por fuente y errores en vez de fingir contenido.
+- Noticias: intento de ingesta oficial BanRep, cobertura agregada de respaldo nacional/regional/mundial, Alpha Vantage opcional y RSS HTTPS configurables. La pantalla muestra estado por fuente y errores en vez de fingir contenido.
 - Contraste oscuro corregido en portada, tarjeta del Asesor, instalación PWA y botón flotante; este último queda por encima de la navegación móvil. Formularios y filtros usan altura coherente.
 
 ### Funciona y fue comprobado
@@ -460,3 +460,40 @@ La actualización del servidor se realizará únicamente después de revisión m
 - Marcar un pago guarda trazabilidad de planificación; el gasto bancario debe registrarse/conciliarse aparte con Firefly. Automatizar ese enlace será la siguiente extensión del adaptador.
 - Las cotizaciones se ingresan con fuente y fecha. No hay órdenes automáticas ni recomendación de compra/venta; el Asesor se mantiene educativo.
 - La entrega Web Push debe verificarse en las PWA reales de ambos móviles.
+
+## 2026-07-22 — Correcciones operativas de tema, chat, planes, pagos y noticias
+
+## Implementado
+
+- Selector claro/oscuro persistente en la esquina superior derecha de todas las pantallas autenticadas, con luna y sol según la acción disponible.
+- Revisión de contraste oscuro en tarjetas, formularios, botones, mensajes, accesos de configuración, PWA y recordatorios.
+- “Pagos” queda visible en móvil desde el primer bloque de “Más”; el distintivo de vencimientos también aparece sobre esa pestaña.
+- El borrado de la conversación compartida elimina todo lo que esa vista muestra; el chat privado continúa limitado al miembro actual. La interfaz confirma cuántos mensajes se eliminaron y muestra errores.
+- Los ingresos cancelados salen de “Lo que viene” y quedan en un historial desplegable. Editar, cancelar, desactivar y archivar muestran resultado o error en lugar de fallar silenciosamente.
+- Corregida la edición de planes que contienen destinos de tipo pago; antes el formulario filtraba por error esas asignaciones.
+- Los pagos semanales, quincenales, mensuales, trimestrales y anuales generan el siguiente vencimiento al confirmar el pago. Editar la próxima fecha mueve la ocurrencia planeada y los campos opcionales pueden limpiarse.
+- Acciones rápidas para copiar referencia, abrir el enlace de pago, informar el valor real y seleccionar el bolsillo de origen.
+- Noticias muestra hasta nueve publicaciones, estado por proveedor y accesos directos a BanRep, DANE y cobertura económica. Se agregaron respaldos nacionales, regionales y mundiales sin clave y `NEWS_REGION_QUERY` para personalizar la región.
+
+## Hallazgos verificados
+
+- El endpoint antiguo del DANE documentado como RSS responde actualmente HTTP 404.
+- BanRep puede devolver una página HTML anti-bot en lugar de RSS; ahora se registra como error de fuente si no contiene artículos válidos.
+- La causa de que “Pagos” no apareciera en teléfono era visual: existía únicamente en la navegación secundaria que se oculta por debajo de 960 px.
+- La instalación móvil previa puede conservar el nombre instalado aunque el manifest ya indique OKLE; se incrementó la versión del `start_url` y se mantiene la instrucción de reinstalación única.
+
+## Pruebas añadidas
+
+- Borrado de conversación compartida y privada.
+- Edición y cancelación de ingresos futuros no ejecutados.
+- Creación del siguiente vencimiento mensual, incluido fin de mes.
+- Continuidad de noticias nacionales, regionales y mundiales cuando una fuente oficial bloquea la ingesta.
+
+## Verificación de esta corrección
+
+- `CI=true pnpm install --frozen-lockfile`, `pnpm db:generate` y `pnpm verify`: correctos.
+- TypeScript y Svelte: 0 errores y 0 advertencias; 21 pruebas de dominio y 33 pruebas API aprobadas.
+- Builds de producción web/API y formato: correctos. AI-CFO: 7 pruebas pytest aprobadas.
+- Nueve pruebas operativas aprobadas; siete validaciones Compose se omitieron porque Docker no está instalado en esta estación.
+- QA móvil a 390 × 844: cambio claro/oscuro, menú Más, acceso a Pagos, formulario, enlace/referencia, editor de planes y recurrencia mensual verificados sin desbordamiento horizontal ni errores de consola.
+- El diálogo nativo de confirmación impidió completar por automatización visual el clic final de cancelar una proyección; la operación quedó cubierta por prueba unitaria de servicio y comprobación estática de la interfaz. No se oculta esta limitación.

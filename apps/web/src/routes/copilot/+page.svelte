@@ -15,7 +15,9 @@
   let generating = $state(false);
   let sending = $state(false);
   let testing = $state(false);
+  let clearing = $state(false);
   let error = $state("");
+  let success = $state("");
   let draft = $state("");
   let messages = $state<ChatMessageView[]>([]);
   const latest = $derived($financeData.insights.find((insight) => insight.scope === scope));
@@ -32,6 +34,7 @@
     scope = next;
     messages = [];
     error = "";
+    success = "";
     await refreshChat();
   }
 
@@ -64,8 +67,20 @@
 
   async function clearConversation() {
     if (!confirm("¿Limpiar tu conversación en este alcance? Esta acción no borra movimientos ni análisis.")) return;
-    await clearChat(scope);
-    messages = [];
+    clearing = true;
+    error = "";
+    success = "";
+    try {
+      const removed = await clearChat(scope);
+      messages = [];
+      success = removed > 0
+        ? `Conversación eliminada: ${removed} mensajes.`
+        : "La conversación ya estaba vacía.";
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No pudimos limpiar la conversación";
+    } finally {
+      clearing = false;
+    }
   }
 
   async function generate() {
@@ -99,10 +114,11 @@
     {#if $financeData.settings.memberRole === "owner"}<button class="secondary-link" disabled={testing} onclick={testConnection}>{testing ? "Probando…" : "Probar conexión"}</button>{/if}
   </section>
   {#if error}<div class="form-error" role="alert"><strong>No pudimos completar la operación</strong><p>{error}</p></div>{/if}
+  {#if success}<p class="success-message" role="status">{success}</p>{/if}
 
   {#if mode === "chat"}
     <section class="chat-panel panel">
-      <div class="section-heading"><div><span class="eyebrow">Contexto anónimo</span><small>Patrones agregados, sin nombres ni números de cuenta.</small></div><button class="danger-text" onclick={clearConversation}>Limpiar conversación</button></div>
+      <div class="section-heading"><div><span class="eyebrow">Contexto anónimo</span><small>Patrones agregados, sin nombres ni números de cuenta.</small></div><button class="danger-text" disabled={clearing} onclick={clearConversation}>{clearing ? "Limpiando…" : "Limpiar conversación"}</button></div>
       <div class="chat-messages" aria-live="polite">
         {#if messages.length === 0}<div class="empty-state"><strong>¿Qué quieres entender o planear?</strong><p>Pregunta, por ejemplo, si tu ritmo de ahorro alcanza para una meta o qué categorías crecieron este mes.</p></div>{/if}
         {#each messages as message}

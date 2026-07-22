@@ -98,7 +98,7 @@ Después de desplegarla, valide en este orden:
 
 Si la PWA instalada conserva el nombre FinNest, elimine una sola vez el acceso antiguo y reinstale OKLE. El nuevo manifiesto usa `id=/okle`, iconos derivados de `okle-master.png` y limpia cachés históricas; los sistemas móviles no renombran siempre una instalación ya existente.
 
-Después valide login de ambos miembros, nombres reales, libros Firefly, cuenta compartida, bolsillo periódico, gasto, Copiloto y Web Push. No ejecute `docker compose down -v`, no cambie `COMPOSE_PROJECT_NAME` y no renombre volúmenes.
+Después valide login de ambos miembros, nombres reales, libros Firefly, cuenta compartida, bolsillo periódico, gasto, Asesor OKLE y Web Push. No ejecute `docker compose down -v`, no cambie `COMPOSE_PROJECT_NAME` y no renombre volúmenes.
 
 ### Rollback
 

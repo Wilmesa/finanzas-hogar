@@ -20,7 +20,9 @@
   let editing = $state<Payment | null>(null);
   let showForm = $state(false);
   let error = $state("");
+  let success = $state("");
   let saving = $state(false);
+  let actionId = $state<string | null>(null);
   let name = $state("");
   let type = $state("service");
   let amount = $state<number | undefined>();
@@ -34,6 +36,10 @@
   let payingOccurrence = $state<Occurrence | null>(null);
   let actualAmount = $state<number | undefined>();
   let sourcePocketId = $state("");
+  const typeLabels: Record<string, string> = {
+    service: "Servicio", debt: "Deuda o crédito", rent: "Arriendo",
+    tax: "Impuesto", insurance: "Seguro", subscription: "Suscripción", other: "Otro",
+  };
 
   onMount(load);
 
@@ -69,7 +75,7 @@
     nextDueDate = payment?.nextDueDate ?? new Date().toISOString().slice(0, 10);
     paymentUrl = payment?.paymentUrl ?? ""; reference = payment?.reference ?? "";
     notes = payment?.notes ?? ""; privatePayment = payment?.visibility === "private";
-    showForm = true; error = "";
+    showForm = true; error = ""; success = "";
   }
 
   async function save() {
@@ -85,26 +91,46 @@
     };
     try {
       if (isServerMode()) {
+        const serverInput = editing
+          ? {
+              ...input,
+              totalAmount: totalAmount ? String(totalAmount) : null,
+              paymentUrl: paymentUrl.trim() || null,
+              reference: reference.trim() || null,
+              notes: notes.trim() || null,
+            }
+          : input;
         await apiRequest(editing ? `/v1/payments/${editing.id}` : "/v1/payments", {
-          method: editing ? "PATCH" : "POST", body: JSON.stringify(input),
+          method: editing ? "PATCH" : "POST", body: JSON.stringify(serverInput),
         });
         await load();
       } else if (editing) {
-        payments = payments.map((item) => item.id === editing?.id ? normalize({ ...item, ...input, estimatedAmount: amount, totalAmount }) : item);
+        payments = payments.map((item) => item.id === editing?.id ? normalize({
+          ...item, ...input, estimatedAmount: amount, totalAmount,
+          paymentUrl: paymentUrl.trim() || undefined,
+          reference: reference.trim() || undefined,
+          notes: notes.trim() || undefined,
+        }) : item);
         persistLocal();
       } else {
         payments = [normalize({ id: crypto.randomUUID(), ...input, estimatedAmount: amount, totalAmount, status: "active", occurrences: [{ id: crypto.randomUUID(), dueDate: nextDueDate, plannedAmount: amount, status: "planned" }] }), ...payments];
         persistLocal();
       }
       showForm = false;
+      success = editing ? "Pago actualizado correctamente." : "Pago creado y recordatorio programado.";
     } catch (cause) { error = cause instanceof Error ? cause.message : "No fue posible guardar"; }
     finally { saving = false; }
   }
 
   async function archive(payment: Payment) {
     if (!confirm(`¿Archivar “${payment.name}”? Su historial se conserva.`)) return;
-    if (isServerMode()) { await apiRequest(`/v1/payments/${payment.id}`, { method: "DELETE" }); await load(); }
-    else { payments = payments.filter((item) => item.id !== payment.id); persistLocal(); }
+    actionId = payment.id; error = "";
+    try {
+      if (isServerMode()) { await apiRequest(`/v1/payments/${payment.id}`, { method: "DELETE" }); await load(); }
+      else { payments = payments.filter((item) => item.id !== payment.id); persistLocal(); }
+      success = "Pago archivado; su historial permanece trazable.";
+    } catch (cause) { error = cause instanceof Error ? cause.message : "No fue posible archivar"; }
+    finally { actionId = null; }
   }
 
   async function addDate(payment: Payment) {
@@ -131,17 +157,45 @@
 
   async function markPaid() {
     if (!payingOccurrence || !actualAmount) return;
+    const paidOccurrence = payingOccurrence;
     if (isServerMode()) {
-      await apiRequest(`/v1/payments/occurrences/${payingOccurrence.id}/paid`, {
+      await apiRequest(`/v1/payments/occurrences/${paidOccurrence.id}/paid`, {
         method: "POST",
         body: JSON.stringify({ actualAmount: String(actualAmount), ...(sourcePocketId ? { sourcePocketId } : {}) }),
       });
       await load();
     } else {
-      payments = payments.map((payment) => ({ ...payment, occurrences: payment.occurrences.map((item) => item.id === payingOccurrence?.id ? { ...item, status: "paid", actualAmount, sourcePocketId, paidAt: new Date().toISOString() } : item) }));
+      payments = payments.map((payment) => {
+        if (!payment.occurrences.some((item) => item.id === paidOccurrence.id)) return payment;
+        const paidOccurrences = payment.occurrences.map((item) => item.id === paidOccurrence.id ? { ...item, status: "paid", actualAmount, sourcePocketId, paidAt: new Date().toISOString() } : item);
+        const next = paidOccurrences.find((item) => item.status === "planned") ?? createNextLocalOccurrence(payment, paidOccurrence);
+        return {
+          ...payment,
+          nextDueDate: next?.dueDate,
+          status: next ? "active" : payment.recurrence === "once" ? "completed" : payment.status,
+          occurrences: next && !paidOccurrences.some((item) => item.id === next.id) ? [...paidOccurrences, next] : paidOccurrences,
+        };
+      });
       persistLocal();
     }
     payingOccurrence = null;
+    success = "Pago confirmado. El siguiente vencimiento quedó actualizado.";
+  }
+
+  function createNextLocalOccurrence(payment: Payment, occurrence: Occurrence): Occurrence | undefined {
+    if (["once", "custom"].includes(payment.recurrence)) return undefined;
+    const next = new Date(`${occurrence.dueDate}T00:00:00`);
+    if (payment.recurrence === "weekly") next.setDate(next.getDate() + 7);
+    else if (payment.recurrence === "biweekly") next.setDate(next.getDate() + 14);
+    else next.setMonth(next.getMonth() + (payment.recurrence === "quarterly" ? 3 : payment.recurrence === "annual" ? 12 : 1));
+    return { id: crypto.randomUUID(), dueDate: next.toISOString().slice(0, 10), plannedAmount: payment.estimatedAmount, status: "planned" };
+  }
+
+  async function copyReference(reference: string) {
+    try {
+      await navigator.clipboard.writeText(reference);
+      success = "Referencia copiada al portapapeles.";
+    } catch { error = "No fue posible copiar. Mantén presionada la referencia para seleccionarla."; }
   }
 
   function urgency(date: string) {
@@ -153,16 +207,17 @@
 <div class="page payments-page">
   <header class="page-header"><div><span class="eyebrow">Compromisos y vencimientos</span><h1>Pagos</h1><p>Programa servicios, cuotas y obligaciones; guarda el enlace, la referencia y el bolsillo que los cubre.</p></div><button class="primary-button" onclick={() => openForm()}>＋ Nuevo pago</button></header>
   {#if error}<p class="form-error" role="alert">{error}</p>{/if}
+  {#if success}<p class="success-message" role="status">{success}</p>{/if}
   <section class="payment-grid">
     {#each payments as payment}
       <article class="panel payment-card" class:private={payment.visibility === "private"}>
-        <header><div><span class="privacy">{payment.visibility === "private" ? "Solo yo" : "Compartido"}</span><h2>{payment.name}</h2><small>{payment.type} · {payment.recurrence}</small></div><strong>{currency(payment.estimatedAmount ?? 0, payment.currency)}</strong></header>
+        <header><div><span class="privacy">{payment.visibility === "private" ? "Solo yo" : "Compartido"}</span><h2>{payment.name}</h2><small>{typeLabels[payment.type] ?? payment.type} · {payment.recurrence}</small></div><strong>{currency(payment.estimatedAmount ?? 0, payment.currency)}</strong></header>
         {#if payment.totalAmount}<div class="payment-total"><span>Compromiso total</span><b>{currency(payment.totalAmount, payment.currency)}</b></div>{/if}
         {#each payment.occurrences.filter((item) => item.status !== "paid").slice(0, 2) as occurrence}
           <div class={`payment-due ${urgency(occurrence.dueDate)}`}><span><small>Próximo vencimiento</small><b>{occurrence.dueDate}</b></span><button onclick={() => openPaid(occurrence)}>Marcar pagado</button></div>
         {/each}
-        <div class="payment-links">{#if payment.paymentUrl}<a href={payment.paymentUrl} target="_blank" rel="noreferrer">Ir a pagar ↗</a>{/if}{#if payment.reference}<span>Ref. {payment.reference}</span>{/if}</div>
-        <div class="row-actions"><button onclick={() => addDate(payment)}>＋ Fecha</button><button onclick={() => openForm(payment)}>Editar</button><button class="danger-text" onclick={() => archive(payment)}>Archivar</button></div>
+        <div class="payment-links">{#if payment.paymentUrl}<a href={payment.paymentUrl} target="_blank" rel="noreferrer">Ir a pagar ↗</a>{/if}{#if payment.reference}<button class="reference-copy" onclick={() => copyReference(payment.reference ?? "")}>Copiar ref. {payment.reference}</button>{/if}</div>
+        <div class="row-actions"><button onclick={() => addDate(payment)}>＋ Fecha y valor</button><button onclick={() => openForm(payment)}>Editar</button><button class="danger-text" disabled={actionId === payment.id} onclick={() => archive(payment)}>{actionId === payment.id ? "Archivando…" : "Archivar"}</button></div>
       </article>
     {/each}
     {#if payments.length === 0}<div class="empty-state panel"><strong>Aún no hay pagos programados</strong><p>Crea uno para activar vencimientos, distintivo de la PWA y recordatorios.</p></div>{/if}

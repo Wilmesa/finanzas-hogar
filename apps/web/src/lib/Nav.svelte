@@ -40,6 +40,7 @@
           {:else}<circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />{/if}
         </svg>
         <span>{item.label}</span>
+        {#if item.href === "/more" && duePayments > 0}<span class="nav-badge mobile-nav-badge" aria-label={`${duePayments} pagos pendientes`}>{duePayments}</span>{/if}
       </a>
     {/each}
   </nav>

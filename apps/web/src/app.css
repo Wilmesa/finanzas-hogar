@@ -47,6 +47,9 @@
   --rose: #432a32;
   --cobalt: #8bb9e8;
   --investment: #e0b44f;
+  --success: #62d9a2;
+  --warning: #f2c35b;
+  --danger: #ff929b;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
 }
 
@@ -153,6 +156,39 @@ button:disabled {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 250px 1fr;
+}
+.theme-toggle {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(18px, env(safe-area-inset-right));
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  box-shadow: 0 8px 24px rgba(9, 24, 40, 0.16);
+  backdrop-filter: blur(12px);
+  font-weight: 800;
+  font-size: 12px;
+}
+.theme-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+  border-color: var(--forest-2);
+  outline: 3px solid color-mix(in srgb, var(--forest-2) 22%, transparent);
 }
 .nav-shell {
   position: sticky;
@@ -264,7 +300,7 @@ main {
 .page {
   max-width: 1330px;
   margin: 0 auto;
-  padding: 42px clamp(24px, 4vw, 64px) 72px;
+  padding: 76px clamp(24px, 4vw, 64px) 72px;
 }
 .page-header {
   display: flex;
@@ -287,6 +323,12 @@ main {
   color: var(--muted);
   margin: 0;
   line-height: 1.55;
+}
+.page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 8px;
 }
 .eyebrow {
   color: var(--muted);
@@ -597,7 +639,7 @@ main {
   font-size: 13px;
 }
 .secondary-button {
-  background: #fffaf1;
+  background: var(--mint);
   color: var(--forest);
   width: 100%;
 }
@@ -688,7 +730,7 @@ label {
   display: grid;
   gap: 7px;
   margin-bottom: 14px;
-  color: #445049;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -782,7 +824,7 @@ textarea:focus {
   margin-bottom: 20px;
   padding: 4px;
   width: fit-content;
-  background: #e7e5de;
+  background: var(--mint);
   border-radius: 13px;
 }
 .filter-tabs button {
@@ -790,7 +832,7 @@ textarea:focus {
   padding: 9px 14px;
   background: transparent;
   border-radius: 9px;
-  color: #68716d;
+  color: var(--muted);
   font-size: 12px;
   font-weight: 750;
 }
@@ -1096,6 +1138,94 @@ textarea:focus {
   height: 40px;
   background: var(--mint);
   border-radius: 12px;
+  color: var(--forest);
+}
+.news-stream {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.news-stream article {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+.news-stream h3 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.35;
+}
+.news-stream p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.news-stream a {
+  margin-top: auto;
+  color: var(--forest-2);
+  font-size: 12px;
+  font-weight: 800;
+}
+.source-directory {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.source-directory a {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
+  min-height: 105px;
+}
+.source-directory small {
+  color: var(--muted);
+}
+.source-directory b {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  color: var(--forest-2);
+}
+
+.planning-shortcuts {
+  margin-bottom: 24px;
+}
+.shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.shortcut-grid a {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 2px 11px;
+  align-items: center;
+  min-height: 98px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--forest-2);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+.shortcut-grid a > span {
+  grid-row: 1 / 3;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  color: var(--forest);
+  background: var(--mint);
+  font-size: 20px;
+  font-weight: 900;
+}
+.shortcut-grid small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+.shortcut-grid .payments-shortcut {
+  border-top-color: #4c8dff;
 }
 
 .secondary-link {
@@ -1228,6 +1358,30 @@ textarea:focus {
 .income-timeline {
   display: grid;
   gap: 10px;
+}
+.cancelled-history {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--paper) 76%, transparent);
+}
+.cancelled-history article {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: var(--paper);
+}
+.cancelled-history article > span {
+  display: grid;
+  gap: 3px;
+}
+.cancelled-history small {
+  color: var(--muted);
 }
 .income-card {
   display: grid;
@@ -1598,6 +1752,47 @@ textarea:focus {
 :root[data-theme="dark"] .hero-progress p {
   color: #dce8f5;
 }
+:root[data-theme="dark"] .insight-card {
+  background: #1d3550;
+  border-color: rgba(255, 255, 255, 0.13);
+}
+:root[data-theme="dark"] .form-error {
+  color: #ffd8dc;
+  background: #522a35;
+}
+:root[data-theme="dark"] .success-message {
+  color: #d7ffeb;
+  background: #174432;
+}
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+:root[data-theme="dark"] .settings-list a,
+:root[data-theme="dark"] .settings-list button,
+:root[data-theme="dark"] .settings-list .import-action,
+:root[data-theme="dark"] .shortcut-grid a,
+:root[data-theme="dark"] .category-chip,
+:root[data-theme="dark"] .connection-status,
+:root[data-theme="dark"] .ai-status {
+  background: #15283a;
+  color: #f4f7fb;
+  border-color: rgba(255, 255, 255, 0.13);
+}
+:root[data-theme="dark"] .settings-icon,
+:root[data-theme="dark"] .shortcut-grid a > span {
+  background: #263f59;
+  color: #b9d9f7;
+}
+:root[data-theme="dark"] .featured-news {
+  background: linear-gradient(150deg, #102d4b, #1d4b68);
+}
+:root[data-theme="dark"] .primary-button,
+:root[data-theme="dark"] .view-tabs button.active {
+  background: #2f73a9;
+  color: #ffffff;
+}
 
 .nav-badge {
   display: inline-grid;
@@ -1611,6 +1806,9 @@ textarea:focus {
   color: #123c69;
   font-size: 11px;
   font-weight: 900;
+}
+.mobile-nav-badge {
+  display: none;
 }
 .payment-grid {
   display: grid;
@@ -1671,6 +1869,16 @@ textarea:focus {
 }
 .payment-links a {
   color: var(--forest-2);
+  font-weight: 800;
+}
+.reference-copy {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--forest-2);
+  font-size: 12px;
   font-weight: 800;
 }
 .payment-form {
@@ -1743,6 +1951,7 @@ textarea:focus {
     gap: 2px;
   }
   .nav-shell nav a {
+    position: relative;
     min-width: 0;
     display: grid;
     justify-items: center;
@@ -1754,7 +1963,17 @@ textarea:focus {
     font-size: 18px;
   }
   .page {
-    padding: 26px 20px 72px;
+    padding: 72px 20px 72px;
+  }
+  .mobile-nav-badge {
+    position: absolute;
+    top: 1px;
+    right: max(4px, calc(50% - 24px));
+    display: inline-grid;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 10px;
   }
   .avatar-button {
     display: grid;
@@ -1795,6 +2014,21 @@ textarea:focus {
 @media (max-width: 620px) {
   .page {
     padding-inline: 15px;
+  }
+  .theme-toggle span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .theme-toggle {
+    width: 46px;
+    justify-content: center;
+    padding-inline: 0;
+  }
+  .shortcut-grid {
+    grid-template-columns: 1fr;
   }
   .page-header h1 {
     font-size: 37px;
@@ -2144,6 +2378,12 @@ h3,
   .secondary-nav {
     display: none;
   }
+  .shortcut-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .source-directory {
+    grid-template-columns: 1fr;
+  }
 }
 @media (max-width: 620px) {
   .source-grid,
@@ -2154,6 +2394,10 @@ h3,
     max-width: 90%;
   }
   .chat-composer {
+    grid-template-columns: 1fr;
+  }
+  .shortcut-grid,
+  .news-stream {
     grid-template-columns: 1fr;
   }
 }

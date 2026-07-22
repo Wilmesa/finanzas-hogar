@@ -18,7 +18,7 @@ El repositorio contiene una **beta experimental funcional y desplegable** de OKL
 - Adaptador Firefly por libro compartido o privado, administración de cuentas desde OKLE y estados independientes por libro.
 - Servicio AI-CFO FastAPI con proveedores OpenAI, Gemini o determinístico de pruebas, salida estructurada y validación de evidencia.
 - Perfiles reales, pagadores del hogar, onboarding diagnosticable y temas claro/oscuro/sistema.
-- Noticias persistentes de BanRep y Alpha Vantage opcional, normalizadas y deduplicadas.
+- Noticias persistentes y deduplicadas con intento de fuente oficial BanRep, cobertura agregada nacional/regional/mundial, RSS configurables y Alpha Vantage opcional.
 - Web Push nativo con horarios múltiples configurables por miembro y registro idempotente de entregas; n8n es un disparador opcional.
 - Docker Compose por target: privado Tailscale, público opcional y n8n integrado bajo perfil explícito.
 - Scripts de preflight, configuración runtime, despliegue, actualización, backup y restauración.
@@ -177,8 +177,8 @@ Use `deterministic` únicamente para pruebas. La PWA recibe proveedor, modelo y 
 - La estructura privada/pública se valida en CI mediante `docker compose config` y build de las imágenes propias, pero los contenedores integrados deben superar healthchecks en Ubuntu antes de datos reales.
 - La inspección visual automatizada y el comportamiento offline se registran en `BITACORA.md`; el stack completo aún debe probarse en una máquina con Docker.
 - Web Push requiere instalar la PWA, conceder permiso en cada dispositivo y completar una prueba real de entrega en el servidor. En iOS se necesita una PWA añadida a la pantalla de inicio.
-- La ingesta BanRep/Alpha Vantage está implementada, pero debe verificarse con red real y ajustar el parser si BanRep modifica su feed.
-- El feed oficial en español de BanRep y el RSS del DANE se consultan sin clave; `NEWS_RSS_FEEDS` permite añadir fuentes regionales HTTPS y Alpha Vantage aporta contexto global cuando se configura su clave.
+- La ingesta registra explícitamente cuando BanRep bloquea robots o no entrega RSS válido; las fuentes agregadas de respaldo evitan que esa caída deje el módulo vacío.
+- OKLE intenta consultar el portal oficial de BanRep y, como respaldo operativo sin clave, agrega cobertura de Google News para economía colombiana, regional y mundial conservando el enlace original de cada publicación. `NEWS_REGION_QUERY` personaliza la región y `NEWS_RSS_FEEDS` permite añadir feeds HTTPS propios. Alpha Vantage aporta contexto global adicional cuando se configura su clave. Las fuentes que bloquean robots o dejan de entregar RSS aparecen como fallidas, sin ocultar el error ni bloquear la aplicación.
 - La operación privada financiada desde el libro común deja atribuciones `pending/failed/synchronized` y un asiento redactado; aún se recomienda un worker outbox dedicado antes de escala comercial.
 - Falta imponer RLS con un rol PostgreSQL de runtime separado y ampliar la prueba E2E de cuentas contra un Firefly efímero con PAT automatizado.
 - Redis/BullMQ, OpenTelemetry y los dashboards de observabilidad están previstos, pero no se activan todavía en código.

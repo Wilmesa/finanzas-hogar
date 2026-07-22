@@ -145,22 +145,23 @@
 </section>
 
 <style>
-  .reminder-card { margin: 1rem 0; padding: clamp(1rem, 3vw, 1.5rem); border: 1px solid var(--border, #d9ddd8); border-radius: 1.25rem; background: var(--surface, #fff); }
+  .reminder-card { margin: 1rem 0; padding: clamp(1rem, 3vw, 1.5rem); border: 1px solid var(--line); border-radius: 1.25rem; background: var(--paper); color: var(--ink); }
   .reminder-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
   h2 { margin: .2rem 0; font-size: 1.25rem; }
   p { margin: .35rem 0; }
   .toggle { display: flex; align-items: center; gap: .45rem; white-space: nowrap; font-weight: 700; }
   .toggle input { width: 1.25rem; height: 1.25rem; accent-color: #176b52; }
   .time-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .8rem; margin-top: 1rem; }
-  .time-grid label > span:first-child { display: block; margin-bottom: .3rem; color: #52615b; font-size: .82rem; }
+  .time-grid label > span:first-child { display: block; margin-bottom: .3rem; color: var(--muted); font-size: .82rem; }
   .time-row { display: flex; gap: .35rem; }
-  input[type="time"] { min-width: 0; flex: 1; padding: .75rem; border: 1px solid #b9c2bd; border-radius: .75rem; font: inherit; background: white; color: #12261f; }
+  input[type="time"] { min-width: 0; flex: 1; padding: .75rem; border: 1px solid var(--line); border-radius: .75rem; font: inherit; background: var(--paper); color: var(--ink); }
   button { min-height: 44px; border-radius: 999px; padding: .65rem 1rem; border: 0; font: inherit; font-weight: 700; cursor: pointer; }
   button:disabled { opacity: .55; cursor: not-allowed; }
-  .remove { width: 44px; padding: 0; border: 1px solid #d7ded9; background: transparent; font-size: 1.35rem; }
+  .remove { width: 44px; padding: 0; border: 1px solid var(--line); background: transparent; color: var(--ink); font-size: 1.35rem; }
   .actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1rem; }
-  .primary { background: #123f33; color: white; }
-  .secondary { background: #e5f0eb; color: #123f33; }
-  .privacy-note, .notice { color: #52615b; font-size: .86rem; margin-top: .85rem; }
+  .primary { background: var(--forest); color: white; }
+  .secondary { background: var(--mint); color: var(--forest); }
+  .privacy-note, .notice { color: var(--muted); font-size: .86rem; margin-top: .85rem; }
+  :global(:root[data-theme="dark"]) .primary { background: #2f73a9; }
   @media (max-width: 520px) { .reminder-heading { flex-direction: column; } .actions button { flex: 1 1 100%; } }
 </style>

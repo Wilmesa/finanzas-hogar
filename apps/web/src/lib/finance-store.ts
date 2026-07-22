@@ -1080,9 +1080,15 @@ export async function sendChatMessage(
   });
 }
 
-export async function clearChat(scope: "household" | "private"): Promise<void> {
-  if (!isServerMode()) return;
-  await apiRequest(`/v1/ai-cfo/chat?scope=${scope}`, { method: "DELETE" });
+export async function clearChat(
+  scope: "household" | "private",
+): Promise<number> {
+  if (!isServerMode()) return 0;
+  const result = await apiRequest<{ removed: number }>(
+    `/v1/ai-cfo/chat?scope=${scope}`,
+    { method: "DELETE" },
+  );
+  return result.removed;
 }
 
 function localTimeBucket(

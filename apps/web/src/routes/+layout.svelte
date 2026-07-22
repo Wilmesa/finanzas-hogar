@@ -4,6 +4,7 @@
   import { hydrateFinanceData } from "$lib/finance-store";
   import { authMode, isAuthenticated, isServerMode, login } from "$lib/auth";
   import LocalLogin from "$lib/LocalLogin.svelte";
+  import ThemeToggle from "$lib/ThemeToggle.svelte";
   import { page } from "$app/state";
   import { onMount } from "svelte";
   import "$lib/theme";
@@ -54,6 +55,7 @@
 {:else}
   <div class="app-shell">
     <Nav />
+    <ThemeToggle />
     <main>{@render children()}</main>
   </div>
 {/if}

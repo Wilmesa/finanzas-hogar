@@ -13,7 +13,6 @@
   import PwaStatus from "$lib/PwaStatus.svelte";
   import NotificationSettings from "$lib/NotificationSettings.svelte";
   import { onMount } from "svelte";
-  import { themePreference, type ThemePreference } from "$lib/theme";
   let message = $state("");
   let error = $state("");
   let currentPassword = $state("");
@@ -26,6 +25,11 @@
   let categoryIcon = $state("tag");
   let categoryColor = $state("#123C69");
   let editingCategoryId = $state<string | null>(null);
+  const newsPortals = [
+    { name: "Banco de la República", area: "Política monetaria y economía colombiana", url: "https://www.banrep.gov.co/es/noticias-rss" },
+    { name: "DANE", area: "Inflación, empleo y estadísticas oficiales", url: "https://www.dane.gov.co/index.php/estadisticas-por-tema" },
+    { name: "Google News Economía", area: "Cobertura nacional, regional y mundial", url: "https://news.google.com/search?q=econom%C3%ADa%20Colombia&hl=es-419&gl=CO&ceid=CO%3Aes-419" },
+  ];
 
   onMount(async () => {
     if (!isServerMode()) return;
@@ -60,10 +64,6 @@
     anchor.click();
     URL.revokeObjectURL(url);
     message = "Exportación creada. Guárdala fuera de este dispositivo.";
-  }
-
-  function selectTheme(event: Event) {
-    themePreference.set((event.currentTarget as HTMLSelectElement).value as ThemePreference);
   }
 
   async function importFile(event: Event) {
@@ -140,7 +140,15 @@
 
 <div class="page">
   <header class="page-header"><div><span class="eyebrow">Contexto y control</span><h1>Configuración</h1><p>Hogar, apariencia, noticias, automatizaciones y respaldo.</p></div></header>
-  <section class="panel"><span class="eyebrow">Apariencia</span><h2>Tema de OKLE</h2><label>Preferencia<select value={$themePreference} onchange={selectTheme}><option value="system">Seguir sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select></label></section>
+  <section class="planning-shortcuts" aria-labelledby="planning-shortcuts-title">
+    <div class="section-heading"><div><span class="eyebrow">Accesos financieros</span><h2 id="planning-shortcuts-title">Planear y cumplir</h2></div></div>
+    <div class="shortcut-grid">
+      <a href="/planning"><span>⌁</span><strong>Plan financiero</strong><small>Sueldos futuros, primas y destinos</small></a>
+      <a class="payments-shortcut" href="/payments"><span>✓</span><strong>Pagos</strong><small>Servicios, cuotas y vencimientos</small></a>
+      <a href="/patrimony"><span>↗</span><strong>Patrimonio</strong><small>Inversiones, CDT e inmuebles</small></a>
+      <a href="/future"><span>◫</span><strong>Simuladores</strong><small>Deudas y proyecciones futuras</small></a>
+    </div>
+  </section>
   <PwaStatus />
   <NotificationSettings />
   <section class="panel section-block">
@@ -159,9 +167,9 @@
       </form>
     </details>
   {/if}
-  <section class="panel news-control"><div><span class="eyebrow">Colombia, región y mundo</span><h2>Noticias financieras verificadas</h2><p>Fuentes oficiales nacionales, RSS regionales configurables y mercados globales.</p></div>{#if $financeData.settings.memberRole === "owner"}<button class="secondary-button" disabled={refreshingNews} onclick={refreshNews}>{refreshingNews ? "Actualizando…" : "Actualizar ahora"}</button>{/if}<div class="news-source-status">{#each newsSources as source}<span class:failed={!source.ok}>{source.ok ? "●" : "×"} {source.source} · {source.imported}</span>{/each}</div></section>
+  <section class="panel news-control"><div><span class="eyebrow">Colombia, región y mundo</span><h2>Noticias financieras verificadas</h2><p>Fuentes oficiales, cobertura agregada y RSS regionales configurables. Cada artículo conserva su enlace original.</p></div>{#if $financeData.settings.memberRole === "owner" && isServerMode()}<button class="secondary-button" disabled={refreshingNews} onclick={refreshNews}>{refreshingNews ? "Actualizando…" : "Actualizar ahora"}</button>{/if}<div class="news-source-status">{#each newsSources as source}<span class:failed={!source.ok} title={source.error ?? `${source.imported} artículos importados`}>{source.ok ? "●" : "×"} {source.source} · {source.imported}</span>{/each}</div></section>
   <section class="news-layout">
-    {#if news[0]}<article class="featured-news"><span class="eyebrow">{news[0].source} · {new Date(news[0].publishedAt).toLocaleDateString("es-CO")}</span><h2>{news[0].title}</h2><p><strong>Hecho publicado:</strong> {news[0].factSummary}</p><a href={news[0].sourceUrl} target="_blank" rel="noreferrer">Abrir fuente original ↗</a></article>{:else}<article class="featured-news empty-news"><span class="eyebrow">Contexto económico</span><h2>Sin noticias verificadas</h2><p>Cuando la ingesta encuentre fuentes oficiales, aparecerán aquí con fecha y enlace original.</p></article>{/if}
+    {#if news[0]}<article class="featured-news"><span class="eyebrow">{news[0].source} · {new Date(news[0].publishedAt).toLocaleDateString("es-CO")}</span><h2>{news[0].title}</h2><p><strong>Hecho publicado:</strong> {news[0].factSummary}</p><a href={news[0].sourceUrl} target="_blank" rel="noreferrer">Abrir fuente original ↗</a></article>{:else}<article class="featured-news empty-news"><span class="eyebrow">Contexto económico</span><h2>{isServerMode() ? "Aún no se importaron noticias" : "Noticias disponibles al conectar el servidor"}</h2><p>Mientras se actualiza la ingesta puedes abrir las fuentes en vivo que aparecen debajo. Los errores de proveedor nunca bloquean tus finanzas.</p></article>{/if}
     <div class="settings-list">
       <a href="/copilot"><span class="settings-icon">✦</span><span><strong>Asesor OKLE</strong><small>Conversación, análisis y evidencia</small></span><b>›</b></a>
       <a href="/household"><span class="settings-icon">♙</span><span><strong>Hogar y perfiles</strong><small>{$financeData.members.length} miembros · {$financeData.settings.baseCurrency}</small></span><b>›</b></a>
@@ -174,6 +182,8 @@
       {#if isServerMode()}<button onclick={() => logout()}><span class="settings-icon">↪</span><span><strong>Cerrar sesión</strong><small>Salir de este dispositivo</small></span><b>›</b></button>{/if}
     </div>
   </section>
+  {#if news.length > 1}<section class="section-block"><header class="section-heading"><div><span class="eyebrow">Últimas publicaciones</span><h2>Más noticias</h2></div><small>{news.length} artículos disponibles</small></header><div class="news-stream">{#each news.slice(1, 9) as article}<article class="panel"><span class="eyebrow">{article.source} · {new Date(article.publishedAt).toLocaleDateString("es-CO")}</span><h3>{article.title}</h3><p>{article.factSummary}</p><a href={article.sourceUrl} target="_blank" rel="noreferrer">Leer fuente original ↗</a></article>{/each}</div></section>{/if}
+  <section class="section-block"><header class="section-heading"><div><span class="eyebrow">Acceso directo</span><h2>Fuentes económicas en vivo</h2></div></header><div class="source-directory">{#each newsPortals as portal}<a class="panel" href={portal.url} target="_blank" rel="noreferrer"><strong>{portal.name}</strong><small>{portal.area}</small><b>↗</b></a>{/each}</div></section>
   {#if message}<p class="success-message" role="status">{message}</p>{/if}
   {#if error}<p class="form-error" role="alert">{error}</p>{/if}
 </div>

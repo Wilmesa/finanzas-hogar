@@ -78,7 +78,7 @@
     <small>En iPhone o iPad: Compartir → Añadir a pantalla de inicio. En otros navegadores, usa la opción Instalar del menú.</small>
   {/if}
   {#if installed}
-    <small>Si aún ves “FinNest”, elimina una vez el acceso anterior y vuelve a instalar OKLE: Android e iOS conservan el nombre de instalaciones antiguas aunque el servidor ya esté actualizado.</small>
+    <small>Si el icono conserva el nombre anterior, elimina una vez el acceso instalado y vuelve a instalar OKLE: Android e iOS no siempre renombran una instalación existente.</small>
   {/if}
   {#if message}<p class="success-message" role="status">{message}</p>{/if}
 </section>

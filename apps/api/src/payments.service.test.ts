@@ -82,4 +82,53 @@ describe("PaymentsService", () => {
     );
     expect(prisma.paymentPlan.update).not.toHaveBeenCalled();
   });
+
+  it("crea el siguiente vencimiento al confirmar un pago recurrente", async () => {
+    const occurrence = {
+      id: "occurrence-1",
+      householdId: actor.householdId,
+      paymentPlanId: "payment-1",
+      dueDate: new Date("2026-01-31T00:00:00Z"),
+      status: "planned",
+      paymentPlan: {
+        id: "payment-1",
+        householdId: actor.householdId,
+        ownerMemberId: actor.memberId,
+        visibility: "household",
+        recurrence: "monthly",
+        dueDay: 31,
+        estimatedAmount: "120000",
+        currency: "COP",
+      },
+    };
+    const transaction = {
+      paymentOccurrence: {
+        update: vi.fn(async () => ({ ...occurrence, status: "paid" })),
+        findFirst: vi.fn(async () => null),
+        upsert: vi.fn(async ({ create }) => ({
+          id: "occurrence-2",
+          ...create,
+        })),
+      },
+      paymentPlan: { update: vi.fn(async () => ({})) },
+    };
+    const prisma = {
+      paymentOccurrence: { findUnique: vi.fn(async () => occurrence) },
+      $transaction: vi.fn(async (callback) => callback(transaction)),
+    };
+    const service = new PaymentsService(prisma as never);
+
+    await service.markPaid(occurrence.id, { actualAmount: "118500" }, actor);
+
+    const upsert = transaction.paymentOccurrence.upsert.mock.calls[0]?.[0];
+    expect(upsert?.create.dueDate.toISOString().slice(0, 10)).toBe(
+      "2026-02-28",
+    );
+    expect(transaction.paymentPlan.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: occurrence.paymentPlanId },
+        data: expect.objectContaining({ status: "active" }),
+      }),
+    );
+  });
 });
