@@ -25,53 +25,20 @@ function chunk(type, data) {
   return Buffer.concat([size, name, data, checksum]);
 }
 
-function distanceToSegment(px, py, ax, ay, bx, by) {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const t = Math.max(
-    0,
-    Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)),
-  );
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
-}
-
-function png(size, maskable = false) {
+function png(size) {
   const rows = Buffer.alloc((size * 4 + 1) * size);
   const scale = size / 512;
-  const safe = maskable ? 54 : 0;
   for (let y = 0; y < size; y += 1) {
     const offset = y * (size * 4 + 1);
     for (let x = 0; x < size; x += 1) {
       const px = x / scale;
       const py = y / scale;
-      let color = [5, 150, 105, 255];
-      if (Math.hypot(px - 256, py - 196) <= 58 - safe * 0.15)
-        color = [219, 234, 254, 255];
-      const bowls = [
-        { cy: 244, rx: 150 - safe, ry: 100 - safe * 0.4 },
-        { cy: 286, rx: 124 - safe * 0.7, ry: 78 - safe * 0.3 },
-        { cy: 330, rx: 92 - safe * 0.5, ry: 54 - safe * 0.2 },
-      ];
-      if (
-        bowls.some(({ cy, rx, ry }) => {
-          const normalized = Math.sqrt(
-            ((px - 256) / rx) ** 2 + ((py - cy) / ry) ** 2,
-          );
-          return py >= cy && normalized > 0.88 && normalized < 1.12;
-        })
-      )
-        color = [248, 250, 252, 255];
-      if (
-        distanceToSegment(
-          px,
-          py,
-          170 + safe,
-          176 + safe,
-          298 - safe,
-          88 + safe,
-        ) <= 12
-      )
-        color = [37, 99, 235, 255];
+      const radius = Math.hypot(px - 256, py - 256);
+      const angle = Math.atan2(py - 256, px - 256);
+      let color = [18, 60, 105, 255];
+      if (radius >= 105 && radius <= 165) color = [247, 248, 250, 255];
+      if (radius >= 105 && radius <= 165 && angle >= -1.25 && angle <= -0.42)
+        color = [242, 195, 91, 255];
       const pixel = offset + 1 + x * 4;
       rows.set(color, pixel);
     }
@@ -92,6 +59,6 @@ await mkdir(outputDir, { recursive: true });
 await Promise.all([
   writeFile(resolve(outputDir, "icon-192.png"), png(192)),
   writeFile(resolve(outputDir, "icon-512.png"), png(512)),
-  writeFile(resolve(outputDir, "maskable-512.png"), png(512, true)),
+  writeFile(resolve(outputDir, "maskable-512.png"), png(512)),
 ]);
 console.log(`Iconos PWA generados en ${outputDir}`);

@@ -1,4 +1,4 @@
-# Guía de uso de FinNest
+# Guía de uso de OKLE
 
 ## Primer ingreso
 
@@ -11,14 +11,14 @@
 
 ## Registrar un gasto
 
-Use **+ Registrar**, seleccione bolsillo, cuenta compatible, descripción, categoría y pagador real. FinNest crea primero una operación pendiente, la envía al libro Firefly correcto y muestra su estado de sincronización. No repita el envío durante un estado de carga.
+Use **+ Registrar**, seleccione bolsillo, cuenta compatible, descripción, categoría y pagador real. OKLE crea primero una operación pendiente, la envía al libro Firefly correcto y muestra su estado de sincronización. No repita el envío durante un estado de carga.
 
 Si no hay cuentas, use el enlace **Crear cuenta**. Si el libro privado no está configurado, las cuentas compartidas continúan disponibles.
 
 ## Bolsillos
 
-- **Meta por fecha:** indique cantidad y fecha; FinNest calcula el aporte periódico.
-- **Meta por aporte:** indique cantidad y capacidad; FinNest calcula cuándo se alcanza.
+- **Meta por fecha:** indique cantidad y fecha; OKLE calcula el aporte periódico.
+- **Meta por aporte:** indique cantidad y capacidad; OKLE calcula cuándo se alcanza.
 - **Límite periódico:** define disponibilidad de vida diaria semanal, mensual o anual.
 - **Compartido:** ambos miembros lo ven y pueden usarlo.
 - **Solo yo:** únicamente el propietario ve finalidad y movimientos.
@@ -31,7 +31,13 @@ Copiloto muestra proveedor, modelo y estado. Al generar, usa solo datos autoriza
 
 ## Tema, PWA y recordatorios
 
-En **Configuración** elija claro, oscuro o sistema. Instale FinNest desde el navegador y active Web Push. Cada miembro puede definir varias horas diarias; las notificaciones son genéricas y un check-in detiene los recordatorios restantes del día.
+En **Configuración** elija claro, oscuro o sistema. Instale OKLE desde el navegador y active Web Push. Cada miembro puede definir varias horas diarias; las notificaciones son genéricas y un check-in detiene los recordatorios restantes del día.
+
+## Asesor OKLE
+
+La vista **Más → Asesor IA** separa conversación y análisis. Antes de preguntar, elija **Compartido** o **Solo yo**: el servidor construye un contexto mínimo del alcance elegido y nunca mezcla bolsillos privados con la conversación del hogar. El historial queda trazado por alcance. Las respuestas son educativas y no reemplazan asesoría profesional.
+
+El propietario puede usar OpenAI, Gemini o cualquier endpoint compatible con OpenAI Chat Completions (NVIDIA NIM, Groq, OpenRouter, Together, LiteLLM y equivalentes) mediante las variables documentadas en `.env.example`; las claves permanecen en el servidor.
 
 ## Privacidad y respaldo
 

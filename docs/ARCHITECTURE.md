@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart LR
-  UI["FinNest · SvelteKit PWA"] --> API["NestJS BFF"]
+  UI["OKLE · SvelteKit PWA"] --> API["NestJS BFF"]
   API --> DB["PostgreSQL: producto"]
   API --> SHARED["Firefly: hogar"]
   API --> PRIVATE["Firefly: miembro privado"]

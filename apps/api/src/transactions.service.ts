@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { canReadPocket, redactPrivateAllocation } from "@finanzas/domain";
+import { z } from "zod";
 import type { Actor } from "./auth.js";
 import { FireflyClient } from "./firefly.client.js";
 import { PrismaService } from "./prisma.service.js";
@@ -23,6 +24,16 @@ export interface CreateTransactionInput {
   fundingSourceScope?: "household" | "private";
   payerMemberId?: string;
 }
+
+const TransactionPatch = z
+  .object({
+    merchant: z.string().trim().min(1).max(255).optional(),
+    category: z.string().trim().min(1).max(100).nullable().optional(),
+  })
+  .refine(
+    (value) => Object.keys(value).length > 0,
+    "Debes enviar al menos un cambio",
+  );
 
 @Injectable()
 export class TransactionsService {
@@ -273,5 +284,47 @@ export class TransactionsService {
       });
       throw error;
     }
+  }
+
+  async update(id: string, raw: unknown, actor: Actor) {
+    const parsed = TransactionPatch.safeParse(raw);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    const existing = await this.prisma.transactionAttribution.findFirst({
+      where: {
+        id,
+        householdId: actor.householdId,
+        OR: [
+          { ledgerScope: "household" },
+          { ledgerScope: "private", payerMemberId: actor.memberId },
+        ],
+      },
+    });
+    if (!existing) throw new NotFoundException();
+    const updated = await this.prisma.transactionAttribution.update({
+      where: { id },
+      data: {
+        ...(parsed.data.merchant !== undefined
+          ? { merchant: parsed.data.merchant }
+          : {}),
+        ...(parsed.data.category !== undefined
+          ? { category: parsed.data.category }
+          : {}),
+      },
+      include: {
+        payer: { select: { id: true, displayName: true, color: true } },
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        householdId: actor.householdId,
+        actorMemberId: actor.memberId,
+        entityType: "TransactionAttribution",
+        entityId: id,
+        action: "corrected",
+        before: JSON.parse(JSON.stringify(existing)) as Prisma.InputJsonValue,
+        after: JSON.parse(JSON.stringify(updated)) as Prisma.InputJsonValue,
+      },
+    });
+    return updated;
   }
 }

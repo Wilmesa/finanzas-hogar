@@ -33,6 +33,7 @@ import { FireflyClient } from "./firefly.client.js";
 import { PlanningService } from "./planning.service.js";
 import { RemindersService } from "./reminders.service.js";
 import { HouseholdService } from "./household.service.js";
+import { CategoriesService } from "./categories.service.js";
 import {
   TransactionsService,
   type CreateTransactionInput,
@@ -115,8 +116,17 @@ export class PocketsController {
   }
 
   @Delete(":id")
-  archive(@Param("id") id: string, @CurrentActor() actor: Actor) {
-    return this.pockets.archive(id, actor);
+  archive(
+    @Param("id") id: string,
+    @Body()
+    body: {
+      disposition?: "transfer" | "release";
+      destinationPocketId?: string;
+    },
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.pockets.archive(id, body, key ?? "", actor);
   }
 
   @Get(":id/projection")
@@ -305,9 +315,37 @@ export class PlanningController {
     return this.planning.createSource(body, actor);
   }
 
+  @Patch("income-sources/:id")
+  updateSource(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.planning.updateSource(id, body, actor);
+  }
+
+  @Delete("income-sources/:id")
+  archiveSource(@Param("id") id: string, @CurrentActor() actor: Actor) {
+    return this.planning.archiveSource(id, actor);
+  }
+
   @Post("expected-incomes")
   createExpectedIncome(@Body() body: unknown, @CurrentActor() actor: Actor) {
     return this.planning.createExpectedIncome(body, actor);
+  }
+
+  @Patch("expected-incomes/:id")
+  updateExpectedIncome(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.planning.updateExpectedIncome(id, body, actor);
+  }
+
+  @Delete("expected-incomes/:id")
+  cancelExpectedIncome(@Param("id") id: string, @CurrentActor() actor: Actor) {
+    return this.planning.cancelExpectedIncome(id, actor);
   }
 
   @Post("plans")
@@ -362,6 +400,44 @@ export class TransactionsController {
   ) {
     return this.transactions.create(body, key ?? "", actor);
   }
+
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.transactions.update(id, body, actor);
+  }
+}
+
+@Controller("v1/categories")
+export class CategoriesController {
+  constructor(private readonly categories: CategoriesService) {}
+
+  @Get()
+  list(@CurrentActor() actor: Actor) {
+    return this.categories.list(actor);
+  }
+
+  @Post()
+  create(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.categories.create(body, actor);
+  }
+
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.categories.update(id, body, actor);
+  }
+
+  @Delete(":id")
+  archive(@Param("id") id: string, @CurrentActor() actor: Actor) {
+    return this.categories.archive(id, actor);
+  }
 }
 
 @Controller("v1/analytics")
@@ -374,20 +450,26 @@ export class AnalyticsController {
     const start = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
     );
-    const transactions = await this.prisma.transactionAttribution.findMany({
-      where: {
-        householdId: actor.householdId,
-        ledgerScope: "household",
-        occurredAt: { gte: start },
-      },
-      select: {
-        amount: true,
-        category: true,
-        merchant: true,
-        payerMemberId: true,
-        currency: true,
-      },
-    });
+    const [transactions, household] = await Promise.all([
+      this.prisma.transactionAttribution.findMany({
+        where: {
+          householdId: actor.householdId,
+          ledgerScope: "household",
+          occurredAt: { gte: start },
+        },
+        select: {
+          amount: true,
+          category: true,
+          merchant: true,
+          payerMemberId: true,
+          currency: true,
+        },
+      }),
+      this.prisma.household.findUniqueOrThrow({
+        where: { id: actor.householdId },
+        select: { baseCurrency: true },
+      }),
+    ]);
     const byCategory = new Map<string, number>();
     for (const transaction of transactions) {
       const category = transaction.category ?? "Sin categoría";
@@ -398,7 +480,7 @@ export class AnalyticsController {
     }
     return {
       periodStart: start.toISOString(),
-      currency: "COP",
+      currency: household.baseCurrency,
       spent: transactions
         .reduce((sum, transaction) => sum + Number(transaction.amount), 0)
         .toString(),
@@ -474,15 +556,21 @@ export class InsightsController {
     const start = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
     );
-    const transactions = await this.prisma.transactionAttribution.findMany({
-      where: {
-        householdId: actor.householdId,
-        ledgerScope: scope,
-        ...(scope === "private" ? { payerMemberId: actor.memberId } : {}),
-        occurredAt: { gte: start, lte: now },
-      },
-      select: { id: true, amount: true, category: true },
-    });
+    const [transactions, household] = await Promise.all([
+      this.prisma.transactionAttribution.findMany({
+        where: {
+          householdId: actor.householdId,
+          ledgerScope: scope,
+          ...(scope === "private" ? { payerMemberId: actor.memberId } : {}),
+          occurredAt: { gte: start, lte: now },
+        },
+        select: { id: true, amount: true, category: true },
+      }),
+      this.prisma.household.findUniqueOrThrow({
+        where: { id: actor.householdId },
+        select: { baseCurrency: true },
+      }),
+    ]);
     const spent = transactions.reduce(
       (sum, item) => sum + Number(item.amount),
       0,
@@ -545,7 +633,7 @@ export class InsightsController {
             Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
           ).getUTCDate() - now.getUTCDate(),
       },
-      currency: "COP",
+      currency: household.baseCurrency,
       metrics: {
         income: "0",
         spent: spent.toString(),
@@ -634,7 +722,10 @@ export class InsightsController {
 
 @Controller("v1/ai-cfo")
 export class AiCfoController {
-  constructor(private readonly ai: AiCfoClient) {}
+  constructor(
+    private readonly ai: AiCfoClient,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get("status")
   status() {
@@ -645,6 +736,126 @@ export class AiCfoController {
   async test(@CurrentActor() actor: Actor) {
     if (actor.role !== "owner") throw new UnauthorizedException();
     return this.ai.status();
+  }
+
+  @Get("chat")
+  history(
+    @CurrentActor() actor: Actor,
+    @Query("scope") requestedScope?: string,
+  ) {
+    const scope = requestedScope === "private" ? "private" : "household";
+    return this.prisma.chatMessage.findMany({
+      where: {
+        householdId: actor.householdId,
+        scope,
+        ...(scope === "private" ? { memberId: actor.memberId } : {}),
+      },
+      orderBy: { createdAt: "asc" },
+      take: 100,
+    });
+  }
+
+  @Post("chat")
+  async chat(
+    @CurrentActor() actor: Actor,
+    @Body() body: { message?: string; scope?: "household" | "private" },
+  ) {
+    const message = body.message?.trim();
+    if (!message || message.length > 4_000)
+      throw new BadRequestException(
+        "El mensaje debe tener entre 1 y 4.000 caracteres",
+      );
+    const scope = body.scope === "private" ? "private" : "household";
+    const [household, transactions, pockets, history] = await Promise.all([
+      this.prisma.household.findUniqueOrThrow({
+        where: { id: actor.householdId },
+        select: { baseCurrency: true },
+      }),
+      this.prisma.transactionAttribution.findMany({
+        where: {
+          householdId: actor.householdId,
+          ledgerScope: scope,
+          ...(scope === "private" ? { payerMemberId: actor.memberId } : {}),
+        },
+        select: { amount: true, category: true, occurredAt: true },
+        orderBy: { occurredAt: "desc" },
+        take: 50,
+      }),
+      this.prisma.pocket.findMany({
+        where: {
+          householdId: actor.householdId,
+          visibility: scope,
+          ...(scope === "private" ? { ownerMemberId: actor.memberId } : {}),
+          status: { not: "archived" },
+        },
+        select: {
+          name: true,
+          purpose: true,
+          currency: true,
+          currentAmount: true,
+          policy: true,
+        },
+        take: 30,
+      }),
+      this.prisma.chatMessage.findMany({
+        where: {
+          householdId: actor.householdId,
+          scope,
+          ...(scope === "private" ? { memberId: actor.memberId } : {}),
+        },
+        select: { role: true, content: true },
+        orderBy: { createdAt: "desc" },
+        take: 12,
+      }),
+    ]);
+    const totals = new Map<string, number>();
+    for (const item of transactions) {
+      const category = item.category ?? "Sin categoría";
+      totals.set(category, (totals.get(category) ?? 0) + Number(item.amount));
+    }
+    const status = await this.ai.status();
+    if (!status.generationEnabled)
+      throw new ServiceUnavailableException(
+        "AI-CFO no está configurado o se encuentra desactivado",
+      );
+    await this.prisma.chatMessage.create({
+      data: {
+        householdId: actor.householdId,
+        memberId: actor.memberId,
+        scope,
+        role: "user",
+        content: message,
+      },
+    });
+    const response = await this.ai.chat({
+      message,
+      scope,
+      currency: household.baseCurrency,
+      history: history.reverse(),
+      context: {
+        period: "últimos 50 movimientos autorizados",
+        spendingByCategory: [...totals.entries()].map(([category, amount]) => ({
+          category,
+          amount: amount.toString(),
+        })),
+        pockets: pockets.map((pocket) => ({
+          ...pocket,
+          currentAmount: pocket.currentAmount.toString(),
+        })),
+      },
+    });
+    return this.prisma.chatMessage.create({
+      data: {
+        householdId: actor.householdId,
+        memberId: actor.memberId,
+        scope,
+        role: "assistant",
+        content: response.content,
+        citations: response.citations as Prisma.InputJsonValue,
+        provider: status.providerName ?? status.provider,
+        model: status.model,
+      },
+    });
   }
 }
 

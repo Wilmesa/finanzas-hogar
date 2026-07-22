@@ -116,7 +116,7 @@ La dirección esperada es `127.0.0.1:3100`, nunca `0.0.0.0:3100`.
 
 ### Administración temporal de Firefly
 
-FinNest administra cuentas desde su propia interfaz. Solo para crear PAT o diagnosticar Firefly, habilite temporalmente su consola en loopback:
+OKLE administra cuentas desde su propia interfaz. Solo para crear PAT o diagnosticar Firefly, habilite temporalmente su consola en loopback:
 
 ```bash
 scripts/firefly-admin.sh start

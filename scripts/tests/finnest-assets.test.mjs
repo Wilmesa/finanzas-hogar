@@ -5,11 +5,11 @@ import test from "node:test";
 const read = (path) =>
   readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
-test("PWA y service worker usan el branding FinNest", () => {
+test("PWA y service worker usan el branding OKLE", () => {
   const manifest = JSON.parse(read("apps/web/static/manifest.webmanifest"));
-  assert.equal(manifest.name, "FinNest");
-  assert.equal(manifest.short_name, "FinNest");
-  assert.match(read("apps/web/src/service-worker.ts"), /finnest-static/);
+  assert.equal(manifest.name, "OKLE");
+  assert.equal(manifest.short_name, "OKLE");
+  assert.match(read("apps/web/src/service-worker.ts"), /okle-static/);
 });
 
 test("la experiencia servidor no contiene identidades ni insight ficticios conocidos", () => {

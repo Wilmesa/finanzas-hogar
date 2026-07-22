@@ -64,6 +64,23 @@ export interface AiStatusView {
   generationEnabled: boolean;
 }
 
+export interface CategoryView {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+}
+
+export interface ChatMessageView {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  provider?: string | null;
+  model?: string | null;
+  citations?: Array<{ title: string; url: string }>;
+}
+
 export interface InsightView {
   id: string;
   scope: "household" | "private";
@@ -125,6 +142,7 @@ export interface IncomeSourceView {
   recurrence: string;
   defaultAmount?: number;
   description?: string;
+  updatedAt?: string;
 }
 
 export interface ExpectedIncomeView {
@@ -140,6 +158,7 @@ export interface ExpectedIncomeView {
   reason: string;
   notes?: string;
   timeBucket: "today" | "this_week" | "this_month" | "next_90_days" | "future";
+  updatedAt?: string;
 }
 
 export interface PlanAllocationView {
@@ -173,6 +192,7 @@ export interface FundingPlanView {
   version: number;
   allocations: PlanAllocationView[];
   revisions: PlanRevisionView[];
+  updatedAt?: string;
 }
 
 export interface FinanceState {
@@ -183,6 +203,7 @@ export interface FinanceState {
   accountConnections: AccountConnectionView[];
   members: MemberView[];
   insights: InsightView[];
+  categories: CategoryView[];
   aiStatus: AiStatusView;
   incomeSources: IncomeSourceView[];
   expectedIncomes: ExpectedIncomeView[];

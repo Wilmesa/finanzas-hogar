@@ -63,8 +63,8 @@ curl -fsS -X PATCH -H "Cookie: $cookie" -H "X-CSRF-Token: $csrf" \
 curl -fsS -X POST -H "Cookie: $cookie" -H "X-CSRF-Token: $csrf" \
   -H 'Content-Type: application/json' -d '{"scope":"household"}' \
   "$base/api/v1/insights/generate" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(!x.id||!x.payload.bundle)process.exit(1)})'
-curl -fsS -H "Cookie: $cookie" "$base/" | grep -q 'FinNest'
-curl -fsS -H "Cookie: $cookie" "$base/manifest.webmanifest" | grep -q 'FinNest'
+curl -fsS -H "Cookie: $cookie" "$base/" | grep -q 'OKLE'
+curl -fsS -H "Cookie: $cookie" "$base/manifest.webmanifest" | grep -q 'OKLE'
 curl -fsS -X POST -H "Cookie: $cookie" -H "X-CSRF-Token: $csrf" "$base/api/v1/auth/logout" >/dev/null
 if curl -fsS -H "Cookie: $cookie" "$base/api/v1/auth/me" >/dev/null 2>&1; then
   echo "La sesión revocada siguió siendo aceptada." >&2

@@ -34,14 +34,14 @@
   }
 </script>
 
-<svelte:head><title>FinNest · Finanzas en pareja</title></svelte:head>
+<svelte:head><title>OKLE · Finanzas en familia</title></svelte:head>
 {#if loading}
-  <div class="auth-screen"><span class="brand-mark">F</span><p>Preparando FinNest…</p></div>
+  <div class="auth-screen"><span class="brand-mark">O</span><p>Preparando OKLE…</p></div>
 {:else if error}
-  <div class="auth-screen"><span class="brand-mark">F</span><h1>No pudimos conectar</h1><p>{error}</p><button class="primary-button" onclick={() => location.reload()}>Reintentar</button></div>
+  <div class="auth-screen"><span class="brand-mark">O</span><h1>No pudimos conectar</h1><p>{error}</p><button class="primary-button" onclick={() => location.reload()}>Reintentar</button></div>
 {:else if !authenticated && isServerMode()}
   <div class="auth-screen">
-    <span class="brand-mark large">F</span>
+    <span class="brand-mark large">O</span>
     <span class="eyebrow">Finanzas en pareja</span>
     <h1>Su dinero, coordinado con propósito</h1>
     <p>Ingresa de forma segura para consultar el hogar y tus bolsillos privados.</p>

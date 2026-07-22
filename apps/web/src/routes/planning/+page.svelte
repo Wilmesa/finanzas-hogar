@@ -1,14 +1,18 @@
 <script lang="ts">
   import { currency } from "$lib/demo";
   import {
+    archiveIncomeSource,
+    cancelExpectedIncome,
     createExpectedIncome,
     createFundingPlan,
     createIncomeSource,
     financeData,
     loadPlanHistory,
     recordPlanReview,
+    updateExpectedIncome,
+    updateIncomeSource,
   } from "$lib/finance-store";
-  import type { FundingPlanView } from "$lib/types";
+  import type { ExpectedIncomeView, FundingPlanView, IncomeSourceView } from "$lib/types";
 
   type Creator = "source" | "income" | "plan" | null;
   type AllocationDraft = {
@@ -24,6 +28,8 @@
   let success = $state("");
   let expandedPlanId = $state<string | null>(null);
   let reviewNote = $state("");
+  let editingSourceId = $state<string | null>(null);
+  let editingIncomeId = $state<string | null>(null);
 
   let sourceName = $state("");
   let sourceKind = $state("salary");
@@ -128,6 +134,8 @@
 
   function openCreator(value: Exclude<Creator, null>) {
     creator = value;
+    editingSourceId = null;
+    editingIncomeId = null;
     error = "";
     success = "";
   }
@@ -137,21 +145,26 @@
     saving = true;
     error = "";
     try {
-      const id = await createIncomeSource({
+      const sourceInput = {
         name: sourceName.trim(),
         kind: sourceKind,
         visibility: sourcePrivate ? "private" : "household",
-        currency: "COP",
+        currency: $financeData.settings.baseCurrency,
         recurrence: sourceRecurrence,
         ...(sourceAmount ? { defaultAmount: sourceAmount } : {}),
         ...(sourceDescription.trim()
           ? { description: sourceDescription.trim() }
           : {}),
-      });
+      } as const;
+      const id = editingSourceId ?? (await createIncomeSource(sourceInput));
+      if (editingSourceId) await updateIncomeSource(editingSourceId, sourceInput);
       incomeSourceId = id;
       sourceName = "";
-      success = "Fuente creada. Ahora registra cuándo esperas recibirla.";
-      creator = "income";
+      success = editingSourceId
+        ? "Fuente actualizada y cambio registrado."
+        : "Fuente creada. Ahora registra cuándo esperas recibirla.";
+      creator = editingSourceId ? null : "income";
+      editingSourceId = null;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "No fue posible crear la fuente";
     } finally {
@@ -167,7 +180,7 @@
     saving = true;
     error = "";
     try {
-      const id = await createExpectedIncome({
+      const incomeInput = {
         sourceId: source.id,
         expectedDate: incomeDate,
         expectedAmount: incomeAmount,
@@ -180,17 +193,68 @@
         !["once", "custom"].includes(selectedIncomeSource.recurrence)
           ? { repeatUntil: incomeRepeatUntil }
           : {}),
-      });
+      } as const;
+      const id = editingIncomeId ?? (await createExpectedIncome(incomeInput));
+      if (editingIncomeId) {
+        await updateExpectedIncome(editingIncomeId, {
+          sourceId: incomeInput.sourceId,
+          expectedDate: incomeInput.expectedDate,
+          expectedAmount: incomeInput.expectedAmount,
+          probability: incomeInput.probability,
+          status: incomeInput.status,
+          reason: incomeInput.reason,
+          notes: incomeNotes.trim(),
+        });
+      }
       planIncomeId = id;
       planPrivate = source.visibility === "private";
       planTargetDate = incomeDate;
-      success = "Ingreso esperado registrado. Ya puedes acordar su destino.";
-      creator = "plan";
+      success = editingIncomeId
+        ? "Ingreso esperado corregido y cambio registrado."
+        : "Ingreso esperado registrado. Ya puedes acordar su destino.";
+      creator = editingIncomeId ? null : "plan";
+      editingIncomeId = null;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "No fue posible guardar el ingreso";
     } finally {
       saving = false;
     }
+  }
+
+  function editSource(source: IncomeSourceView) {
+    creator = "source";
+    editingSourceId = source.id;
+    sourceName = source.name;
+    sourceKind = source.kind;
+    sourceRecurrence = source.recurrence;
+    sourceAmount = source.defaultAmount;
+    sourceDescription = source.description ?? "";
+    sourcePrivate = source.visibility === "private";
+  }
+
+  function editIncome(income: ExpectedIncomeView) {
+    creator = "income";
+    editingIncomeId = income.id;
+    incomeSourceId = income.sourceId;
+    incomeDate = income.expectedDate;
+    incomeAmount = income.expectedAmount;
+    incomeProbability = Math.round(income.probability * 100);
+    incomeReason = income.reason;
+    incomeNotes = income.notes ?? "";
+    incomeConfirmed = income.status === "confirmed";
+    incomeRepeatUntil = "";
+  }
+
+  async function removeSource(source: IncomeSourceView) {
+    if (!confirm(`¿Desactivar la fuente “${source.name}”? Los ingresos ya creados conservarán su historia.`)) return;
+    await archiveIncomeSource(source.id);
+    success = "Fuente desactivada. El historial permanece disponible.";
+  }
+
+  async function cancelIncome(income: ExpectedIncomeView) {
+    if (!confirm(`¿Cancelar el ingreso esperado de ${income.sourceName}?`)) return;
+    await cancelExpectedIncome(income.id);
+    success = "Ingreso esperado cancelado sin borrar su trazabilidad.";
   }
 
   async function savePlan() {
@@ -321,7 +385,7 @@
           <label class="wide-field">¿Qué representa?<input bind:value={sourceDescription} placeholder="Origen, condiciones o contexto" /></label>
           <label class="switch-row wide-field"><input type="checkbox" bind:checked={sourcePrivate} /><span>Solo yo</span><small>Por defecto se comparte con la pareja.</small></label>
         </div>
-        <button class="primary-button" disabled={saving} onclick={saveSource}>Guardar fuente</button>
+        <button class="primary-button" disabled={saving} onclick={saveSource}>{editingSourceId ? "Guardar cambios" : "Guardar fuente"}</button>
       {:else if creator === "income"}
         <div class="form-grid planning-form">
           <label>Fuente<select bind:value={incomeSourceId}>{#each $financeData.incomeSources as source}<option value={source.id}>{source.name} · {source.visibility === "private" ? "Solo yo" : "Compartida"}</option>{/each}</select></label>
@@ -333,7 +397,7 @@
           <label class="wide-field">Recordatorio o condición<input bind:value={incomeNotes} placeholder="Ej. confirmar desprendible antes de transferir" /></label>
           <label class="switch-row wide-field"><input type="checkbox" bind:checked={incomeConfirmed} /><span>Valor ya confirmado</span><small>Confirmado no significa recibido.</small></label>
         </div>
-        <button class="primary-button" disabled={saving} onclick={saveIncome}>Guardar ingreso esperado</button>
+        <button class="primary-button" disabled={saving} onclick={saveIncome}>{editingIncomeId ? "Guardar corrección" : "Guardar ingreso esperado"}</button>
       {:else}
         <div class="form-grid planning-form">
           <label>Ingreso a distribuir<select bind:value={planIncomeId}>{#each unplannedIncomes as income}<option value={income.id}>{income.sourceName} · {currency(income.expectedAmount, income.currency)} · {income.expectedDate}</option>{/each}</select>{#if unplannedIncomes.length === 0}<small>Todos los ingresos ya tienen acuerdo. Crea otro ingreso o revisa el plan existente.</small>{/if}</label>
@@ -366,13 +430,25 @@
   {/if}
 
   <section class="section-block">
+    <header class="section-heading"><div><span class="eyebrow">Orígenes recurrentes</span><h2>Fuentes de ingreso</h2></div><button class="text-button" onclick={() => openCreator("source")}>Nueva fuente</button></header>
+    <div class="source-grid">
+      {#each $financeData.incomeSources as source}
+        <article class="panel source-card">
+          <div><span class="privacy">{source.visibility === "private" ? "Solo yo" : "Compartida"}</span><h3>{source.name}</h3><p>{source.description ?? source.kind}</p><small>{source.recurrence} · {source.currency}{source.updatedAt ? ` · editada ${new Date(source.updatedAt).toLocaleDateString("es-CO")}` : ""}</small></div>
+          <div class="row-actions"><button onclick={() => editSource(source)}>Editar</button><button class="danger-text" onclick={() => removeSource(source)}>Desactivar</button></div>
+        </article>
+      {/each}
+    </div>
+  </section>
+
+  <section class="section-block">
     <header class="section-heading"><div><span class="eyebrow">Calendario de liquidez</span><h2>Lo que viene</h2></div></header>
     <div class="income-timeline">
       {#each $financeData.expectedIncomes as income}
         <article class="income-card">
           <div class="timeline-dot"></div>
           <div><span class="eyebrow">{bucketLabels[income.timeBucket]} · {income.expectedDate}</span><h3>{income.sourceName}</h3><p>{income.reason}</p>{#if income.notes}<small>{income.notes}</small>{/if}</div>
-          <div class="income-number"><strong>{currency(income.expectedAmount, income.currency)}</strong><span class={`status ${income.status}`}>{income.status === "confirmed" ? "Confirmado" : income.status === "received" ? "Recibido" : "Estimado"} · {Math.round(income.probability * 100)}%</span></div>
+          <div class="income-number"><strong>{currency(income.expectedAmount, income.currency)}</strong><span class={`status ${income.status}`}>{income.status === "confirmed" ? "Confirmado" : income.status === "received" ? "Recibido" : income.status === "cancelled" ? "Cancelado" : "Estimado"} · {Math.round(income.probability * 100)}%</span><small>{income.updatedAt ? `Editado ${new Date(income.updatedAt).toLocaleDateString("es-CO")}` : "Guardado"}</small><div class="row-actions"><button onclick={() => editIncome(income)}>Editar</button>{#if income.status !== "received" && income.status !== "cancelled"}<button class="danger-text" onclick={() => cancelIncome(income)}>Cancelar</button>{/if}</div></div>
         </article>
       {/each}
       {#if $financeData.expectedIncomes.length === 0}<p class="empty-state">Aún no hay ingresos futuros registrados.</p>{/if}
@@ -384,12 +460,12 @@
     <div class="plan-grid">
       {#each $financeData.fundingPlans as plan}
         <article class="plan-card">
-          <header><div><span class="privacy">{plan.visibility === "private" ? "Solo yo" : "Compartido"}</span><span class={`status ${plan.status}`}>{plan.status}</span></div><small>Versión {plan.version}</small></header>
+          <header><div><span class="privacy">{plan.visibility === "private" ? "Solo yo" : "Compartido"}</span><span class={`status ${plan.status}`}>{plan.status}</span></div><small>Versión {plan.version} · {plan.updatedAt ? new Date(plan.updatedAt).toLocaleString("es-CO") : "Guardado"}</small></header>
           <h3>{plan.title}</h3><p>{plan.purpose}</p>
           <div class="plan-destinations">
             {#each plan.allocations as allocation}<div><span>{allocation.sourceName} → <b>{allocation.pocketName}</b></span><strong>{allocation.mode === "fixed" ? currency(allocation.value ?? 0, plan.currency) : allocation.mode === "percentage" ? `${Math.round((allocation.value ?? 0) * 100)} %` : "Remanente"}</strong><small>{allocation.rationale}</small></div>{/each}
           </div>
-          <button class="secondary-button" onclick={() => toggleHistory(plan)}>{expandedPlanId === plan.id ? "Ocultar historia" : "Consultar decisiones"}</button>
+          <button class="primary-button subtle" onclick={() => toggleHistory(plan)}>{expandedPlanId === plan.id ? "Ocultar historia" : "Revisar acuerdo"}</button>
           {#if expandedPlanId === plan.id}
             <div class="decision-history">
               {#each plan.revisions as revision}<div><span>v{revision.version}</span><p>{revision.decisionNote}</p><small>{revision.actorName ?? "Miembro"} · {new Date(revision.createdAt).toLocaleString("es-CO")}</small></div>{/each}

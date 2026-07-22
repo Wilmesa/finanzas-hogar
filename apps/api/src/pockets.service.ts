@@ -113,15 +113,128 @@ export class PocketsService {
     return this.find(id, actor);
   }
 
-  async archive(id: string, actor: Actor) {
+  async archive(
+    id: string,
+    raw: { disposition?: "transfer" | "release"; destinationPocketId?: string },
+    idempotencyKey: string,
+    actor: Actor,
+  ) {
     const pocket = await this.find(id, actor);
     if (pocket.ownerMemberId !== actor.memberId && actor.role !== "owner") {
       throw new NotFoundException();
     }
-    return this.prisma.pocket.update({
-      where: { id: pocket.id },
-      data: { status: "archived", version: { increment: 1 } },
-    });
+    const hasBalance = !pocket.currentAmount.isZero();
+    if (hasBalance && !idempotencyKey) {
+      throw new BadRequestException(
+        "Idempotency-Key es obligatorio para reasignar el saldo",
+      );
+    }
+    if (hasBalance && !raw.disposition) {
+      throw new BadRequestException({
+        code: "POCKET_BALANCE_REQUIRES_DISPOSITION",
+        message: "Elige qué hacer con el saldo antes de archivar",
+        currentAmount: pocket.currentAmount.toString(),
+        currency: pocket.currency,
+      });
+    }
+    let destination: Awaited<ReturnType<PocketsService["find"]>> | null = null;
+    if (raw.disposition === "transfer") {
+      if (!raw.destinationPocketId || raw.destinationPocketId === pocket.id) {
+        throw new BadRequestException("Selecciona otro bolsillo de destino");
+      }
+      destination = await this.find(raw.destinationPocketId, actor);
+      if (
+        destination.status !== "active" ||
+        destination.currency !== pocket.currency ||
+        destination.visibility !== pocket.visibility
+      ) {
+        throw new BadRequestException(
+          "El bolsillo de destino debe estar activo y usar la misma moneda y visibilidad",
+        );
+      }
+    }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        if (hasBalance && raw.disposition === "transfer" && destination) {
+          await tx.pocketEvent.createMany({
+            data: [
+              {
+                householdId: actor.householdId,
+                pocketId: pocket.id,
+                actorMemberId: actor.memberId,
+                type: "transferred",
+                amount: pocket.currentAmount,
+                currency: pocket.currency,
+                planningOnly: true,
+                idempotencyKey: `${idempotencyKey}:source`,
+                metadata: { destinationPocketId: destination.id },
+              },
+              {
+                householdId: actor.householdId,
+                pocketId: destination.id,
+                actorMemberId: actor.memberId,
+                type: "transferred",
+                amount: pocket.currentAmount,
+                currency: pocket.currency,
+                planningOnly: true,
+                idempotencyKey: `${idempotencyKey}:destination`,
+                metadata: { sourcePocketId: pocket.id },
+              },
+            ],
+          });
+          await tx.pocket.update({
+            where: { id: destination.id },
+            data: {
+              currentAmount: { increment: pocket.currentAmount },
+              version: { increment: 1 },
+            },
+          });
+        } else if (hasBalance && raw.disposition === "release") {
+          await tx.pocketEvent.create({
+            data: {
+              householdId: actor.householdId,
+              pocketId: pocket.id,
+              actorMemberId: actor.memberId,
+              type: "released",
+              amount: pocket.currentAmount,
+              currency: pocket.currency,
+              planningOnly: true,
+              idempotencyKey: `${idempotencyKey}:release`,
+            },
+          });
+        }
+        const archived = await tx.pocket.update({
+          where: { id: pocket.id },
+          data: {
+            ...(hasBalance ? { currentAmount: new Prisma.Decimal(0) } : {}),
+            status: "archived",
+            version: { increment: 1 },
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            householdId: actor.householdId,
+            actorMemberId: actor.memberId,
+            entityType: "Pocket",
+            entityId: pocket.id,
+            action: "archived",
+            before: JSON.parse(JSON.stringify(pocket)) as Prisma.InputJsonValue,
+            after: JSON.parse(
+              JSON.stringify(archived),
+            ) as Prisma.InputJsonValue,
+          },
+        });
+        return archived;
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new ConflictException("Esta operación ya fue procesada");
+      }
+      throw error;
+    }
   }
 
   async project(id: string, actor: Actor, startDate: string) {

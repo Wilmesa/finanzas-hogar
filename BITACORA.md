@@ -1,4 +1,4 @@
-# Bitácora técnica y de operación — FinNest
+# Bitácora técnica y de operación — OKLE
 
 Este documento es la fuente de verdad operativa del proyecto. Registra qué se construyó, cómo se verificó, qué falló, qué queda pendiente y cómo trasladar el sistema a un servidor nuevo. Debe actualizarse con cada cambio de arquitectura, despliegue o incidente.
 
@@ -348,7 +348,7 @@ Esta lista debe reducirse antes de declarar versión estable:
 - Instaladores móviles Capacitor y firma de tiendas.
 - Open Banking y lectura de notificaciones, reservados para Fase 2.
 
-## 2026-07-21 — Estabilización funcional y rediseño FinNest
+## 2026-07-21 — Estabilización funcional y rediseño previo a OKLE
 
 ### Diagnóstico confirmado
 
@@ -360,7 +360,7 @@ Esta lista debe reducirse antes de declarar versión estable:
 
 ### Implementado y funcionando en pruebas automatizadas
 
-- Branding visible FinNest, identidad de nido, manifiesto, service worker e iconos PWA reproducibles 192/512/maskable.
+- Branding visible de la etapa anterior, manifiesto, service worker e iconos PWA reproducibles 192/512/maskable.
 - Tema claro, oscuro y sistema con tokens CSS propios; se retiró el plugin Tailwind del build para evitar dos sistemas visuales simultáneos.
 - Navegación principal Hoy/Futuro/Patrimonio/Copiloto/Movimientos y accesos secundarios a Bolsillos, Cuentas y Configuración.
 - Perfiles y hogar reales: lectura de miembros, edición del nombre propio/color, edición del hogar solo por owner y cambio de contraseña local.
@@ -393,3 +393,39 @@ Esta lista debe reducirse antes de declarar versión estable:
 ### Migración y rollback
 
 La actualización del servidor se realizará únicamente después de revisión manual y merge. El procedimiento es `scripts/backup.sh`, árbol Git limpio y `DEPLOY_TARGET=private scripts/update-server.sh`. No usar `docker compose down -v`, no renombrar volúmenes ni cambiar `COMPOSE_PROJECT_NAME`. El rollback de código usa `runtime/deploy/last-update.env`; las columnas nuevas son compatibles hacia atrás y no requieren borrarse para volver temporalmente a la imagen anterior.
+
+## 2026-07-21 — Blueprint de estabilización y marca definitiva OKLE
+
+### Implementado
+
+- Marca definitiva **OKLE** en interfaz, PWA, notificaciones, Keycloak, AI-CFO, documentación y metadatos. El isotipo es una O corporativa azul marino con acento ámbar.
+- Migración transparente de preferencias y demostración local desde las claves históricas `finnest:*`; no se elimina información previa. El service worker elimina únicamente cachés estáticas obsoletas.
+- Sistema visual azul marino/ámbar, tipografía única Inter/sistema, cifras tabulares, iconos SVG, navegación mobile-first de cinco destinos y navegación secundaria de escritorio.
+- CRUD real de fuentes e ingresos esperados, edición de movimientos, edición y archivo seguro de bolsillos con decisión explícita para el saldo, y CRUD de categorías configurables.
+- Registro genérico `AuditLog` para cambios sensibles y `ChatMessage` para conversación trazable. La migración aditiva es `202607220001_okle_crud_chat`.
+- Asesor OKLE conversacional con historial separado `household/private`, contexto agregado mínimo y persistencia. Funciona con `openai`, `gemini`, `deterministic` o `openai_compatible`; este último admite NVIDIA NIM, Groq, OpenRouter, Together, LiteLLM y gateways equivalentes.
+- Pantalla de movimientos con filtros por texto, pagador, categoría y fecha, edición y señal visual de recurrencia; configuración de categorías desde Más.
+- Se retiraron las dependencias Tailwind residuales: OKLE mantiene un único sistema de tokens CSS.
+
+### Comprobado hasta esta revisión
+
+- Instalación reproducible con lockfile actualizado.
+- Prisma Client generado con `Category`, `AuditLog`, `ChatMessage` y tipos de dominio existentes.
+- `pnpm check`: 0 errores TypeScript, 0 errores Svelte y 0 advertencias.
+- No se añadieron `any`, `@ts-ignore`, secretos, tokens ni datos domésticos reales.
+
+### Verificación final de esta revisión
+
+- `pnpm verify`: correcto. Incluye TypeScript/Svelte (0 errores, 0 advertencias), 21 pruebas de dominio, 24 pruebas API, build de producción web/API y Prettier.
+- `python3 -m pytest services/ai-cfo/tests -q`: 7 pruebas aprobadas, incluida conversación determinística y selección de proveedor compatible.
+- Iconos PWA 192/512/maskable regenerados de forma reproducible con la marca OKLE.
+- QA real en navegador a 390 × 844: portada, Asesor OKLE y Movimientos sin desbordamiento horizontal (`scrollWidth = innerWidth = 390`); navegación inferior mide 65 px y la secundaria de escritorio queda oculta.
+- La inspección visual detectó un botón Editar que creaba una fila implícita en móvil. Se corrigió con columna explícita e icono accesible y se volvió a comprobar en un origen limpio.
+- Docker no está instalado en esta estación (`docker: command not found`): las siete pruebas operativas Compose quedaron `SKIP` por esa condición. No se afirma que se ejecutaron; CI Ubuntu debe validarlas.
+
+### Pendientes y límites conocidos
+
+- La persistencia especializada de deudas y tarjetas (fechas de corte, pago y estado mensual) continúa como evolución funcional; las proyecciones determinísticas y cuentas Firefly existentes siguen disponibles.
+- La búsqueda web en vivo debe activarse por proveedor con políticas y fuentes aprobadas; el chat actual no inventa citas y solo muestra enlaces cuando el servicio devuelve referencias verificables.
+- Falta ejecutar validaciones Compose y builds Docker en CI o en una estación con Docker.
+- Ninguna migración se aplicó al servidor personal; se aplicará después de revisión, backup y merge siguiendo `docs/DEPLOY_PRIVATE_TAILSCALE.md`.

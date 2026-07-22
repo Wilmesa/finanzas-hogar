@@ -80,7 +80,7 @@
 
 <div class="page">
   <header class="page-header">
-    <div><span class="eyebrow">Fuente contable · Firefly III</span><h1>Cuentas</h1><p>Administra cuentas y tarjetas sin salir de FinNest.</p></div>
+    <div><span class="eyebrow">Fuente contable · Firefly III</span><h1>Cuentas</h1><p>Administra cuentas y tarjetas sin salir de OKLE.</p></div>
     <button class="primary-button" onclick={() => openCreate()}>＋ Nueva cuenta</button>
   </header>
 

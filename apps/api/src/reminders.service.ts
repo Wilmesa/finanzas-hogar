@@ -234,7 +234,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
                 keys: { p256dh: subscription.p256dh, auth: subscription.auth },
               },
               JSON.stringify({
-                title: "FinNest",
+                title: "OKLE",
                 body: "¿Ya registraste los movimientos de hoy?",
                 url: "/transactions?action=new",
                 tag: `daily-expenses-${local.date}-${local.time}`,

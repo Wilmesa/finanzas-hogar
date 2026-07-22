@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from app.models import InsightBundle, InsightSnapshot
+from app.models import ChatRequest, InsightBundle, InsightSnapshot
 from app.provider import DeterministicProvider, GeminiProvider, OpenAICompatibleProvider, provider_from_environment
 from app.validator import validate_bundle
 
@@ -67,3 +67,15 @@ def test_openai_compatible_provider_supports_custom_vendor(monkeypatch):
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.model == "custom-model"
     assert provider.provider_name == "Proveedor de prueba"
+
+
+def test_deterministic_chat_preserves_requested_scope():
+    request = ChatRequest(
+        message="¿Cómo va mi meta?",
+        scope="private",
+        currency="COP",
+        context={"pockets": [{"name": "Meta privada", "amount": "100"}]},
+    )
+    response = asyncio.run(DeterministicProvider().chat(request))
+    assert "modelo externo" in response.content
+    assert response.citations == []
