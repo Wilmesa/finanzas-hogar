@@ -34,6 +34,8 @@ import { PlanningService } from "./planning.service.js";
 import { RemindersService } from "./reminders.service.js";
 import { HouseholdService } from "./household.service.js";
 import { CategoriesService } from "./categories.service.js";
+import { PaymentsService } from "./payments.service.js";
+import { PatrimonyService } from "./patrimony.service.js";
 import {
   TransactionsService,
   type CreateTransactionInput,
@@ -151,6 +153,98 @@ export class PocketsController {
   ) {
     if (!key) throw new BadRequestException("Idempotency-Key es obligatorio");
     return this.pockets.allocate(id, body, key, actor);
+  }
+}
+
+@Controller("v1/payments")
+export class PaymentsController {
+  constructor(private readonly payments: PaymentsService) {}
+
+  @Get()
+  list(@CurrentActor() actor: Actor) {
+    return this.payments.list(actor);
+  }
+
+  @Get("due-count")
+  dueCount(@CurrentActor() actor: Actor) {
+    return this.payments.dueCount(actor);
+  }
+
+  @Post()
+  create(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.payments.create(body, actor);
+  }
+
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.payments.update(id, body, actor);
+  }
+
+  @Delete(":id")
+  archive(@Param("id") id: string, @CurrentActor() actor: Actor) {
+    return this.payments.archive(id, actor);
+  }
+
+  @Post(":id/occurrences")
+  addOccurrence(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.payments.addOccurrence(id, body, actor);
+  }
+
+  @Post("occurrences/:id/paid")
+  markPaid(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.payments.markPaid(id, body, actor);
+  }
+}
+
+@Controller("v1/patrimony")
+export class PatrimonyController {
+  constructor(private readonly patrimony: PatrimonyService) {}
+  @Get() overview(@CurrentActor() actor: Actor) {
+    return this.patrimony.overview(actor);
+  }
+  @Post("investments") createInvestment(
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.patrimony.createInvestment(body, actor);
+  }
+  @Patch("investments/:id") updateInvestment(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.patrimony.updateInvestment(id, body, actor);
+  }
+  @Post("properties") createProperty(
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.patrimony.createProperty(body, actor);
+  }
+  @Patch("properties/:id") updateProperty(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.patrimony.updateProperty(id, body, actor);
+  }
+  @Post("snapshots") snapshot(
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.patrimony.snapshot(body, actor);
   }
 }
 
@@ -360,6 +454,21 @@ export class PlanningController {
     @CurrentActor() actor: Actor,
   ) {
     return this.planning.revisePlan(id, body, actor);
+  }
+
+  @Delete("plans/:id")
+  archivePlan(@Param("id") id: string, @CurrentActor() actor: Actor) {
+    return this.planning.archivePlan(id, actor);
+  }
+
+  @Post("allocations/:id/execute")
+  executeAllocation(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.planning.executeAllocation(id, body, key ?? "", actor);
   }
 
   @Get("plans/:id/history")
@@ -755,6 +864,22 @@ export class AiCfoController {
     });
   }
 
+  @Delete("chat")
+  async clearHistory(
+    @CurrentActor() actor: Actor,
+    @Query("scope") requestedScope?: string,
+  ) {
+    const scope = requestedScope === "private" ? "private" : "household";
+    const result = await this.prisma.chatMessage.deleteMany({
+      where: {
+        householdId: actor.householdId,
+        memberId: actor.memberId,
+        scope,
+      },
+    });
+    return { removed: result.count };
+  }
+
   @Post("chat")
   async chat(
     @CurrentActor() actor: Actor,
@@ -777,7 +902,12 @@ export class AiCfoController {
           ledgerScope: scope,
           ...(scope === "private" ? { payerMemberId: actor.memberId } : {}),
         },
-        select: { amount: true, category: true, occurredAt: true },
+        select: {
+          amount: true,
+          category: true,
+          occurredAt: true,
+          payerMemberId: true,
+        },
         orderBy: { occurredAt: "desc" },
         take: 50,
       }),
@@ -809,9 +939,22 @@ export class AiCfoController {
       }),
     ]);
     const totals = new Map<string, number>();
+    const memberAliases = new Map<string, string>();
+    const totalsByMember = new Map<string, number>();
     for (const item of transactions) {
       const category = item.category ?? "Sin categoría";
       totals.set(category, (totals.get(category) ?? 0) + Number(item.amount));
+      if (!memberAliases.has(item.payerMemberId)) {
+        memberAliases.set(
+          item.payerMemberId,
+          `Miembro ${memberAliases.size + 1}`,
+        );
+      }
+      const alias = memberAliases.get(item.payerMemberId)!;
+      totalsByMember.set(
+        alias,
+        (totalsByMember.get(alias) ?? 0) + Number(item.amount),
+      );
     }
     const status = await this.ai.status();
     if (!status.generationEnabled)
@@ -838,6 +981,15 @@ export class AiCfoController {
           category,
           amount: amount.toString(),
         })),
+        spendingByAnonymousMember: [...totalsByMember.entries()].map(
+          ([member, amount]) => ({ member, amount: amount.toString() }),
+        ),
+        privacy: {
+          identitiesRemoved: true,
+          accountIdentifiersRemoved: true,
+          freeTextNotesRemoved: true,
+          privatePartnerDataExcluded: scope === "household",
+        },
         pockets: pockets.map((pocket) => ({
           ...pocket,
           currentAmount: pocket.currentAmount.toString(),
@@ -872,6 +1024,11 @@ export class NewsController {
   refresh(@CurrentActor() actor: Actor) {
     if (actor.role !== "owner") throw new UnauthorizedException();
     return this.news.refresh();
+  }
+
+  @Get("status")
+  status() {
+    return this.news.status();
   }
 }
 

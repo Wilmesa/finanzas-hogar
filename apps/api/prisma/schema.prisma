@@ -66,6 +66,11 @@ model Household {
   categories   Category[]
   auditLogs    AuditLog[]
   chatMessages ChatMessage[]
+  paymentPlans PaymentPlan[]
+  paymentOccurrences PaymentOccurrence[]
+  investments InvestmentPosition[]
+  propertyAssets PropertyAsset[]
+  netWorthSnapshots NetWorthSnapshot[]
 }
 
 model LocalUser {
@@ -109,6 +114,9 @@ model Member {
   localUser LocalUser?
   auditLogs AuditLog[]
   chatMessages ChatMessage[]
+  paymentPlans PaymentPlan[] @relation("PaymentOwner")
+  investments InvestmentPosition[] @relation("InvestmentOwner")
+  propertyAssets PropertyAsset[] @relation("PropertyOwner")
 
   @@unique([householdId, email])
   @@index([householdId])
@@ -183,6 +191,8 @@ model Pocket {
   transactions   TransactionAttribution[]
   allocationRules IncomeAllocationRule[]
   fundingAllocations PlanFundingAllocation[]
+  paymentOccurrences PaymentOccurrence[] @relation("PaymentSourcePocket")
+  investments InvestmentPosition[]
 
   @@index([householdId, visibility, status])
   @@index([ownerMemberId, visibility])
@@ -410,7 +420,8 @@ model PlanFundingAllocation {
   householdId      String
   planId           String
   expectedIncomeId String
-  pocketId         String
+  pocketId         String?
+  paymentPlanId    String?
   mode             String
   value            Decimal?       @db.Decimal(30, 8)
   priority         Int
@@ -418,15 +429,142 @@ model PlanFundingAllocation {
   status           String         @default("planned")
   appliedAt        DateTime?
   pocketEventId    String?
+  executedAmount   Decimal        @default(0) @db.Decimal(30, 8)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   plan             FinancialPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
   expectedIncome   ExpectedIncome @relation(fields: [expectedIncomeId], references: [id], onDelete: Cascade)
-  pocket           Pocket         @relation(fields: [pocketId], references: [id])
+  pocket           Pocket?        @relation(fields: [pocketId], references: [id])
+  paymentPlan      PaymentPlan?   @relation(fields: [paymentPlanId], references: [id])
 
   @@index([householdId, expectedIncomeId, priority])
   @@index([planId, priority])
   @@index([pocketId, status])
+  @@index([paymentPlanId, status])
+}
+
+model PaymentPlan {
+  id              String           @id @default(uuid())
+  householdId     String
+  ownerMemberId   String
+  visibility      PocketVisibility @default(household)
+  name            String
+  type            String
+  currency        String
+  totalAmount     Decimal?         @db.Decimal(30, 8)
+  estimatedAmount Decimal?         @db.Decimal(30, 8)
+  recurrence      String           @default("monthly")
+  dueDay          Int?
+  nextDueDate     DateTime?        @db.Date
+  paymentUrl      String?
+  reference       String?
+  notes           String?
+  status          String           @default("active")
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  household       Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  owner           Member           @relation("PaymentOwner", fields: [ownerMemberId], references: [id])
+  occurrences     PaymentOccurrence[]
+  fundingAllocations PlanFundingAllocation[]
+
+  @@index([householdId, visibility, status, nextDueDate])
+  @@index([ownerMemberId, visibility])
+}
+
+model PaymentOccurrence {
+  id                       String       @id @default(uuid())
+  householdId              String
+  paymentPlanId            String
+  dueDate                  DateTime     @db.Date
+  plannedAmount            Decimal?     @db.Decimal(30, 8)
+  actualAmount             Decimal?     @db.Decimal(30, 8)
+  status                   String       @default("planned")
+  paidAt                   DateTime?
+  sourcePocketId           String?
+  transactionAttributionId String?
+  note                     String?
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  household                Household    @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  paymentPlan              PaymentPlan  @relation(fields: [paymentPlanId], references: [id], onDelete: Cascade)
+  sourcePocket             Pocket?      @relation("PaymentSourcePocket", fields: [sourcePocketId], references: [id])
+
+  @@unique([paymentPlanId, dueDate])
+  @@index([householdId, dueDate, status])
+}
+
+model InvestmentPosition {
+  id                String           @id @default(uuid())
+  householdId       String
+  ownerMemberId     String
+  pocketId          String?
+  visibility        PocketVisibility @default(household)
+  kind              String
+  name              String
+  institution       String?
+  currency          String
+  principal         Decimal          @db.Decimal(30, 8)
+  openedAt          DateTime          @db.Date
+  maturityDate      DateTime?         @db.Date
+  annualRate        Decimal?          @db.Decimal(12, 8)
+  expectedGrossGain Decimal?          @db.Decimal(30, 8)
+  feesAndTaxes      Decimal?          @db.Decimal(30, 8)
+  expectedNetGain   Decimal?          @db.Decimal(30, 8)
+  ticker            String?
+  units             Decimal?          @db.Decimal(30, 8)
+  purchasePrice     Decimal?          @db.Decimal(30, 8)
+  currentPrice      Decimal?          @db.Decimal(30, 8)
+  priceAsOf         DateTime?
+  sourceUrl         String?
+  status            String            @default("active")
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  household         Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  owner             Member            @relation("InvestmentOwner", fields: [ownerMemberId], references: [id])
+  pocket            Pocket?           @relation(fields: [pocketId], references: [id])
+
+  @@index([householdId, visibility, status])
+  @@index([ownerMemberId, visibility])
+}
+
+model PropertyAsset {
+  id                    String           @id @default(uuid())
+  householdId           String
+  ownerMemberId         String
+  visibility            PocketVisibility @default(household)
+  name                  String
+  type                  String
+  currency              String
+  purchaseValue         Decimal?         @db.Decimal(30, 8)
+  currentEstimatedValue Decimal          @db.Decimal(30, 8)
+  purchaseDate          DateTime?         @db.Date
+  locationSector        String?
+  annualAppreciation    Decimal?          @db.Decimal(12, 8)
+  lastValuationAt       DateTime          @db.Date
+  notes                 String?
+  status                String            @default("active")
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  household             Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  owner                 Member             @relation("PropertyOwner", fields: [ownerMemberId], references: [id])
+
+  @@index([householdId, visibility, status])
+}
+
+model NetWorthSnapshot {
+  id          String   @id @default(uuid())
+  householdId String
+  recordedAt  DateTime @db.Date
+  currency    String
+  assets      Decimal  @db.Decimal(30, 8)
+  liabilities Decimal  @db.Decimal(30, 8)
+  netWorth    Decimal  @db.Decimal(30, 8)
+  source      String   @default("calculated")
+  createdAt   DateTime @default(now())
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, recordedAt, currency])
+  @@index([householdId, recordedAt])
 }
 
 model PlanRevision {

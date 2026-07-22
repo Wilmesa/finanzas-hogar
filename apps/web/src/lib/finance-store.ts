@@ -63,7 +63,7 @@ const demoInitial: FinanceState = {
       name: "Cuenta del hogar (demo)",
       type: "asset",
       currency: "COP",
-      currentBalance: 8_000_000,
+      currentBalance: 50_000_000,
       scope: "household",
     },
     {
@@ -156,6 +156,7 @@ const demoInitial: FinanceState = {
       version: 1,
       allocations: [
         {
+          id: "allocation-bonus-home",
           expectedIncomeId: "income-bonus-december",
           pocketId: "home",
           pocketName: "Cuota inicial",
@@ -167,6 +168,7 @@ const demoInitial: FinanceState = {
             "Acercar la cuota inicial sin usar el presupuesto ordinario.",
         },
         {
+          id: "allocation-bonus-daily",
           expectedIncomeId: "income-bonus-december",
           pocketId: "daily",
           pocketName: "Vida diaria",
@@ -282,6 +284,7 @@ function serverPocketToView(item: Record<string, unknown>): PocketView {
   const currentAmount = Number(item.currentAmount ?? 0);
   return {
     id: String(item.id),
+    ownerMemberId: String(item.ownerMemberId),
     name: String(item.name),
     purpose: String(item.purpose),
     visibility: item.visibility === "private" ? "private" : "household",
@@ -364,11 +367,18 @@ function serverFundingPlanToView(
     allocations: allocations.map((allocation) => {
       const income = allocation.expectedIncome as Record<string, unknown>;
       const source = income.source as Record<string, unknown>;
-      const pocket = allocation.pocket as Record<string, unknown>;
+      const pocket = allocation.pocket as Record<string, unknown> | null;
+      const payment = allocation.paymentPlan as Record<string, unknown> | null;
       return {
+        id: String(allocation.id),
         expectedIncomeId: String(allocation.expectedIncomeId),
-        pocketId: String(allocation.pocketId),
-        pocketName: String(pocket.name),
+        ...(allocation.pocketId
+          ? { pocketId: String(allocation.pocketId) }
+          : {}),
+        ...(allocation.paymentPlanId
+          ? { paymentPlanId: String(allocation.paymentPlanId) }
+          : {}),
+        pocketName: String(pocket?.name ?? payment?.name ?? "Destino"),
         sourceName: String(source.name),
         mode: allocation.mode as "fixed" | "percentage" | "remainder",
         ...(allocation.value !== null && allocation.value !== undefined
@@ -376,6 +386,9 @@ function serverFundingPlanToView(
           : {}),
         priority: Number(allocation.priority),
         rationale: String(allocation.rationale),
+        status: (allocation.status ?? "planned") as
+          "planned" | "partial" | "applied",
+        executedAmount: Number(allocation.executedAmount ?? 0),
       };
     }),
     revisions: revisions.map((revision) => ({
@@ -1067,6 +1080,11 @@ export async function sendChatMessage(
   });
 }
 
+export async function clearChat(scope: "household" | "private"): Promise<void> {
+  if (!isServerMode()) return;
+  await apiRequest(`/v1/ai-cfo/chat?scope=${scope}`, { method: "DELETE" });
+}
+
 function localTimeBucket(
   expectedDate: string,
 ): ExpectedIncomeView["timeBucket"] {
@@ -1369,7 +1387,8 @@ export async function createFundingPlan(input: {
   decisionNote: string;
   allocations: Array<{
     expectedIncomeId: string;
-    pocketId: string;
+    pocketId?: string;
+    paymentPlanId?: string;
     mode: "fixed" | "percentage" | "remainder";
     value?: number;
     priority: number;
@@ -1431,13 +1450,14 @@ export async function createFundingPlan(input: {
     for (const allocation of [...allocations].sort(
       (left, right) => left.priority - right.priority,
     )) {
-      const pocket = state.pockets.find(
-        (item) => item.id === allocation.pocketId,
-      );
+      const pocket = allocation.pocketId
+        ? state.pockets.find((item) => item.id === allocation.pocketId)
+        : undefined;
       if (
-        !pocket ||
-        pocket.visibility !== input.visibility ||
-        pocket.currency !== input.currency
+        allocation.pocketId &&
+        (!pocket ||
+          pocket.visibility !== input.visibility ||
+          pocket.currency !== input.currency)
       ) {
         throw new Error(
           "Cada bolsillo debe tener el mismo alcance y moneda del plan",
@@ -1473,15 +1493,15 @@ export async function createFundingPlan(input: {
       const income = state.expectedIncomes.find(
         (item) => item.id === allocation.expectedIncomeId,
       );
-      const pocket = state.pockets.find(
-        (item) => item.id === allocation.pocketId,
-      );
-      if (!income || !pocket)
-        throw new Error("La fuente o el bolsillo ya no existe");
+      const pocket = allocation.pocketId
+        ? state.pockets.find((item) => item.id === allocation.pocketId)
+        : undefined;
+      if (!income || (allocation.pocketId && !pocket))
+        throw new Error("La fuente o el destino ya no existe");
       return {
         ...allocation,
         sourceName: income.sourceName,
-        pocketName: pocket.name,
+        pocketName: pocket?.name ?? "Pago programado",
       };
     }),
     revisions: [
@@ -1571,6 +1591,148 @@ export async function recordPlanReview(
   }));
 }
 
+export async function updateFundingPlan(
+  planId: string,
+  input: {
+    title: string;
+    purpose: string;
+    horizon: FundingPlanView["horizon"];
+    status: FundingPlanView["status"];
+    targetDate?: string;
+    decisionNote: string;
+    allocations?: Array<{
+      expectedIncomeId: string;
+      pocketId?: string;
+      paymentPlanId?: string;
+      mode: "fixed" | "percentage" | "remainder";
+      value?: number;
+      priority: number;
+      rationale: string;
+    }>;
+  },
+): Promise<void> {
+  if (isServerMode()) {
+    await apiRequest(`/v1/planning/plans/${planId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...input,
+        ...(input.allocations
+          ? {
+              allocations: input.allocations.map((allocation) => ({
+                ...allocation,
+                value:
+                  allocation.value === undefined
+                    ? undefined
+                    : String(allocation.value),
+              })),
+            }
+          : {}),
+      }),
+    });
+    await hydrateFinanceData();
+    return;
+  }
+  const currentState = get(financeData);
+  const normalizedAllocations = input.allocations?.map((allocation) => {
+    const pocket = allocation.pocketId
+      ? currentState.pockets.find((item) => item.id === allocation.pocketId)
+      : undefined;
+    const income = currentState.expectedIncomes.find(
+      (item) => item.id === allocation.expectedIncomeId,
+    );
+    return {
+      ...allocation,
+      id: crypto.randomUUID(),
+      pocketName: pocket?.name ?? "Destino",
+      sourceName: income?.sourceName ?? "Ingreso",
+      status: "planned" as const,
+      executedAmount: 0,
+    };
+  });
+  const planFields = {
+    title: input.title,
+    purpose: input.purpose,
+    horizon: input.horizon,
+    status: input.status,
+    ...(input.targetDate ? { targetDate: input.targetDate } : {}),
+    decisionNote: input.decisionNote,
+  };
+  financeData.update((state) => ({
+    ...state,
+    fundingPlans: state.fundingPlans.map((plan) =>
+      plan.id === planId
+        ? {
+            ...plan,
+            ...planFields,
+            ...(normalizedAllocations
+              ? { allocations: normalizedAllocations }
+              : {}),
+            version: plan.version + 1,
+            revisions: [
+              {
+                version: plan.version + 1,
+                decisionNote: input.decisionNote,
+                createdAt: new Date().toISOString(),
+                actorName: state.settings.memberName,
+              },
+              ...plan.revisions,
+            ],
+          }
+        : plan,
+    ),
+  }));
+}
+
+export async function archiveFundingPlan(planId: string): Promise<void> {
+  if (isServerMode()) {
+    await apiRequest(`/v1/planning/plans/${planId}`, { method: "DELETE" });
+    await hydrateFinanceData();
+    return;
+  }
+  financeData.update((state) => ({
+    ...state,
+    fundingPlans: state.fundingPlans.filter((plan) => plan.id !== planId),
+  }));
+}
+
+export async function executePlanAllocation(
+  allocationId: string,
+  amount: number,
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      fundingPlans: state.fundingPlans.map((plan) => ({
+        ...plan,
+        allocations: plan.allocations.map((allocation) =>
+          allocation.id === allocationId
+            ? {
+                ...allocation,
+                executedAmount: (allocation.executedAmount ?? 0) + amount,
+                status: "partial",
+              }
+            : allocation,
+        ),
+      })),
+      pockets: state.pockets.map((pocket) => {
+        const allocation = state.fundingPlans
+          .flatMap((plan) => plan.allocations)
+          .find((item) => item.id === allocationId);
+        return allocation?.pocketId === pocket.id
+          ? { ...pocket, currentAmount: pocket.currentAmount + amount }
+          : pocket;
+      }),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/planning/allocations/${allocationId}/execute`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ amount: String(amount) }),
+  });
+  await hydrateFinanceData();
+}
+
 export function exportFinanceData(): string {
   return JSON.stringify(get(financeData), null, 2);
 }
@@ -1641,7 +1803,9 @@ export async function importFinanceData(raw: string): Promise<void> {
     for (const plan of parsed.fundingPlans ?? []) {
       const allocations = plan.allocations.flatMap((allocation) => {
         const expectedIncomeId = incomeIds.get(allocation.expectedIncomeId);
-        const pocketId = pocketIds.get(allocation.pocketId);
+        const pocketId = allocation.pocketId
+          ? pocketIds.get(allocation.pocketId)
+          : undefined;
         if (!expectedIncomeId || !pocketId) return [];
         return [
           {

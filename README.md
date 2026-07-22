@@ -124,10 +124,13 @@ python3 -m pytest services/ai-cfo/tests -q
 - `GET/PATCH /v1/household` y `PATCH /v1/profile`: hogar, miembros e identidad visible.
 - `GET /v1/onboarding/status`: diagnóstico seguro de la configuración inicial.
 - `GET/POST/PATCH /v1/planning/*`: fuentes, ingresos esperados, planes, asignaciones e historia de decisiones.
+- `GET/POST/PATCH/DELETE /v1/payments`: pagos, vencimientos, enlaces, referencias y confirmación del bolsillo de origen.
+- `GET/POST/PATCH /v1/patrimony/*`: CDTs, inversiones, inmuebles y cortes históricos del patrimonio.
 - `POST /v1/transactions`: registra en el libro Firefly correcto y guarda su atribución.
 - `POST /v1/projections/*`: ahorro, CDT, deuda, inversión e inmuebles sin modificar Firefly.
 - `GET/POST /v1/insights`: consulta o genera un snapshot permitido, valida y persiste el análisis.
 - `GET /v1/ai-cfo/status`: proveedor, modelo y disponibilidad, nunca la API key.
+- `GET /v1/news` y `POST /v1/news/refresh`: noticias oficiales de Colombia, fuentes RSS regionales configurables y proveedor global.
 - `GET/PUT /v1/reminders/preferences`: consulta y configura horarios individuales.
 - `GET /v1/push/public-key` y `POST/DELETE /v1/push/subscriptions`: registra cada dispositivo PWA.
 - `POST /v1/automation/reminders/process`: disparador opcional autenticado para n8n.
@@ -175,6 +178,7 @@ Use `deterministic` únicamente para pruebas. La PWA recibe proveedor, modelo y 
 - La inspección visual automatizada y el comportamiento offline se registran en `BITACORA.md`; el stack completo aún debe probarse en una máquina con Docker.
 - Web Push requiere instalar la PWA, conceder permiso en cada dispositivo y completar una prueba real de entrega en el servidor. En iOS se necesita una PWA añadida a la pantalla de inicio.
 - La ingesta BanRep/Alpha Vantage está implementada, pero debe verificarse con red real y ajustar el parser si BanRep modifica su feed.
+- El feed oficial en español de BanRep y el RSS del DANE se consultan sin clave; `NEWS_RSS_FEEDS` permite añadir fuentes regionales HTTPS y Alpha Vantage aporta contexto global cuando se configura su clave.
 - La operación privada financiada desde el libro común deja atribuciones `pending/failed/synchronized` y un asiento redactado; aún se recomienda un worker outbox dedicado antes de escala comercial.
 - Falta imponer RLS con un rol PostgreSQL de runtime separado y ampliar la prueba E2E de cuentas contra un Firefly efímero con PAT automatizado.
 - Redis/BullMQ, OpenTelemetry y los dashboards de observabilidad están previstos, pero no se activan todavía en código.

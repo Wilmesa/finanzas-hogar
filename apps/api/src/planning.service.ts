@@ -89,13 +89,21 @@ const ExpectedIncomePatch = ExpectedIncomeInput.omit({ repeatUntil: true })
 const AllocationInput = z
   .object({
     expectedIncomeId: z.string().min(1),
-    pocketId: z.string().min(1),
+    pocketId: z.string().min(1).optional(),
+    paymentPlanId: z.string().min(1).optional(),
     mode: z.enum(["fixed", "percentage", "remainder"]),
     value: z.string().optional(),
     priority: z.number().int().min(1),
     rationale: z.string().trim().min(1).max(500),
   })
   .superRefine((value, context) => {
+    if (Boolean(value.pocketId) === Boolean(value.paymentPlanId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["pocketId"],
+        message: "Selecciona exactamente un bolsillo o un pago",
+      });
+    }
     if (value.mode !== "remainder" && value.value === undefined) {
       context.addIssue({
         code: "custom",
@@ -175,6 +183,7 @@ export class PlanningService {
             include: {
               expectedIncome: { include: { source: true } },
               pocket: true,
+              paymentPlan: true,
             },
             orderBy: { priority: "asc" },
           },
@@ -491,7 +500,8 @@ export class PlanningService {
             create: input.allocations.map((allocation) => ({
               householdId: actor.householdId,
               expectedIncomeId: allocation.expectedIncomeId,
-              pocketId: allocation.pocketId,
+              pocketId: allocation.pocketId ?? null,
+              paymentPlanId: allocation.paymentPlanId ?? null,
               mode: allocation.mode,
               value: allocation.value
                 ? new Prisma.Decimal(allocation.value)
@@ -553,6 +563,15 @@ export class PlanningService {
     const visibility = input.visibility ?? existing.visibility;
     const currency = input.currency ?? existing.currency;
     if (input.allocations) {
+      const executed = await this.prisma.planFundingAllocation.findFirst({
+        where: { planId: id, status: { not: "planned" } },
+        select: { id: true },
+      });
+      if (executed) {
+        throw new ConflictException(
+          "Los destinos con ejecución parcial o total no pueden reemplazarse; crea un nuevo plan para el remanente",
+        );
+      }
       await this.validateAllocations(
         visibility,
         currency,
@@ -569,7 +588,8 @@ export class PlanningService {
             householdId: actor.householdId,
             planId: id,
             expectedIncomeId: allocation.expectedIncomeId,
-            pocketId: allocation.pocketId,
+            pocketId: allocation.pocketId ?? null,
+            paymentPlanId: allocation.paymentPlanId ?? null,
             mode: allocation.mode,
             value: allocation.value
               ? new Prisma.Decimal(allocation.value)
@@ -632,6 +652,145 @@ export class PlanningService {
       where: { planId: id, householdId: actor.householdId },
       include: { actor: { select: { id: true, displayName: true } } },
       orderBy: { version: "desc" },
+    });
+  }
+
+  async archivePlan(id: string, actor: Actor) {
+    const existing = await this.planForActor(id, actor);
+    if (existing.ownerMemberId !== actor.memberId && actor.role !== "owner") {
+      throw new NotFoundException();
+    }
+    const updated = await this.prisma.financialPlan.update({
+      where: { id },
+      data: { status: "archived" },
+    });
+    await this.recordAudit(
+      actor,
+      "FinancialPlan",
+      id,
+      "archived",
+      existing,
+      updated,
+    );
+    return updated;
+  }
+
+  async executeAllocation(id: string, raw: unknown, key: string, actor: Actor) {
+    if (!key) throw new BadRequestException("Idempotency-Key es obligatorio");
+    const parsed = z.object({ amount: PositiveMoney }).safeParse(raw);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    const allocation = await this.prisma.planFundingAllocation.findUnique({
+      where: { id },
+      include: {
+        plan: true,
+        expectedIncome: true,
+        pocket: true,
+        paymentPlan: true,
+      },
+    });
+    if (!allocation || !this.canRead(allocation.plan, actor)) {
+      throw new NotFoundException();
+    }
+    if (allocation.expectedIncome.status !== "received") {
+      throw new ConflictException(
+        "Confirma primero que el ingreso fue recibido",
+      );
+    }
+    const siblings = await this.prisma.planFundingAllocation.findMany({
+      where: {
+        planId: allocation.planId,
+        expectedIncomeId: allocation.expectedIncomeId,
+      },
+      orderBy: { priority: "asc" },
+    });
+    const base =
+      allocation.expectedIncome.actualAmount ??
+      allocation.expectedIncome.expectedAmount;
+    const forecast = previewExpectedIncomeFunding({
+      incomeAmount: base.toString(),
+      currency: allocation.plan.currency,
+      allocations: siblings.map((item) => ({
+        targetId: item.id,
+        mode: item.mode as "fixed" | "percentage" | "remainder",
+        ...(item.value !== null ? { value: item.value.toString() } : {}),
+        priority: item.priority,
+      })),
+    });
+    const planned = new Prisma.Decimal(
+      forecast.allocations.find((item) => item.targetId === id)?.amount ?? 0,
+    );
+    const requested = new Prisma.Decimal(parsed.data.amount);
+    const remaining = planned.minus(allocation.executedAmount);
+    if (requested.greaterThan(remaining)) {
+      throw new BadRequestException(
+        `Solo quedan ${remaining.toString()} por ejecutar en este destino`,
+      );
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const repeated = await tx.planAuditEvent.findFirst({
+        where: {
+          planId: allocation.planId,
+          action: "allocation_executed",
+          details: { path: ["idempotencyKey"], equals: key },
+        },
+      });
+      if (repeated) return allocation;
+      let pocketEventId: string | null = null;
+      if (allocation.pocket) {
+        const event = await tx.pocketEvent.create({
+          data: {
+            householdId: actor.householdId,
+            pocketId: allocation.pocket.id,
+            actorMemberId: actor.memberId,
+            type: "allocated",
+            amount: requested,
+            currency: allocation.plan.currency,
+            planningOnly: true,
+            idempotencyKey: key,
+            metadata: {
+              planId: allocation.planId,
+              allocationId: id,
+              expectedIncomeId: allocation.expectedIncomeId,
+            },
+          },
+        });
+        pocketEventId = event.id;
+        await tx.pocket.update({
+          where: { id: allocation.pocket.id },
+          data: {
+            currentAmount: { increment: requested },
+            version: { increment: 1 },
+          },
+        });
+      }
+      const nextExecuted = allocation.executedAmount.plus(requested);
+      const status = nextExecuted.greaterThanOrEqualTo(planned)
+        ? "applied"
+        : "partial";
+      const updated = await tx.planFundingAllocation.update({
+        where: { id },
+        data: {
+          executedAmount: nextExecuted,
+          status,
+          appliedAt: status === "applied" ? new Date() : null,
+          pocketEventId,
+        },
+      });
+      await tx.planAuditEvent.create({
+        data: {
+          householdId: actor.householdId,
+          planId: allocation.planId,
+          actorMemberId: actor.memberId,
+          action: "allocation_executed",
+          details: {
+            idempotencyKey: key,
+            allocationId: id,
+            amount: requested.toString(),
+            status,
+          },
+        },
+      });
+      return updated;
     });
   }
 
@@ -710,14 +869,28 @@ export class PlanningService {
     const incomeIds = [
       ...new Set(allocations.map((item) => item.expectedIncomeId)),
     ];
-    const pocketIds = [...new Set(allocations.map((item) => item.pocketId))];
-    const [incomes, pockets, existingAllocation] = await Promise.all([
+    const pocketIds = [
+      ...new Set(
+        allocations.flatMap((item) => (item.pocketId ? [item.pocketId] : [])),
+      ),
+    ];
+    const paymentIds = [
+      ...new Set(
+        allocations.flatMap((item) =>
+          item.paymentPlanId ? [item.paymentPlanId] : [],
+        ),
+      ),
+    ];
+    const [incomes, pockets, payments, existingAllocation] = await Promise.all([
       this.prisma.expectedIncome.findMany({
         where: { id: { in: incomeIds }, householdId: actor.householdId },
         include: { source: true },
       }),
       this.prisma.pocket.findMany({
         where: { id: { in: pocketIds }, householdId: actor.householdId },
+      }),
+      this.prisma.paymentPlan.findMany({
+        where: { id: { in: paymentIds }, householdId: actor.householdId },
       }),
       this.prisma.planFundingAllocation.findFirst({
         where: {
@@ -734,7 +907,8 @@ export class PlanningService {
     }
     if (
       incomes.length !== incomeIds.length ||
-      pockets.length !== pocketIds.length
+      pockets.length !== pocketIds.length ||
+      payments.length !== paymentIds.length
     ) {
       throw new NotFoundException();
     }
@@ -750,6 +924,12 @@ export class PlanningService {
           !this.canRead(pocket, actor) ||
           pocket.visibility !== visibility ||
           pocket.currency !== currency,
+      ) ||
+      payments.some(
+        (payment) =>
+          !this.canRead(payment, actor) ||
+          payment.visibility !== visibility ||
+          payment.currency !== currency,
       )
     ) {
       throw new BadRequestException(
@@ -764,7 +944,7 @@ export class PlanningService {
           allocations: allocations
             .filter((item) => item.expectedIncomeId === income.id)
             .map((item) => ({
-              targetId: item.pocketId,
+              targetId: item.pocketId ?? item.paymentPlanId ?? "",
               mode: item.mode,
               ...(item.value !== undefined ? { value: item.value } : {}),
               priority: item.priority,
@@ -785,7 +965,8 @@ export class PlanningService {
     currency: string;
     allocations: Array<{
       expectedIncomeId: string;
-      pocketId: string;
+      pocketId: string | null;
+      paymentPlanId: string | null;
       mode: string;
       value: Prisma.Decimal | null;
       priority: number;
@@ -807,7 +988,7 @@ export class PlanningService {
           incomeAmount: first.expectedIncome.expectedAmount.toString(),
           currency: plan.currency,
           allocations: allocations.map((item) => ({
-            targetId: item.pocketId,
+            targetId: item.pocketId ?? item.paymentPlanId ?? "",
             mode: item.mode as "fixed" | "percentage" | "remainder",
             ...(item.value !== null ? { value: item.value.toString() } : {}),
             priority: item.priority,

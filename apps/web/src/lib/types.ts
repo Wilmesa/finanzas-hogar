@@ -1,5 +1,6 @@
 export interface PocketView {
   id: string;
+  ownerMemberId?: string;
   name: string;
   purpose: string;
   visibility: "household" | "private";
@@ -162,14 +163,18 @@ export interface ExpectedIncomeView {
 }
 
 export interface PlanAllocationView {
+  id?: string;
   expectedIncomeId: string;
-  pocketId: string;
+  pocketId?: string;
+  paymentPlanId?: string;
   pocketName: string;
   sourceName: string;
   mode: "fixed" | "percentage" | "remainder";
   value?: number;
   priority: number;
   rationale: string;
+  status?: "planned" | "partial" | "applied";
+  executedAmount?: number;
 }
 
 export interface PlanRevisionView {

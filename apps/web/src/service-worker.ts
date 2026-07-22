@@ -97,21 +97,35 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  let payload: { title?: string; body?: string; url?: string; tag?: string } =
-    {};
+  let payload: {
+    title?: string;
+    body?: string;
+    url?: string;
+    tag?: string;
+    badgeCount?: number;
+  } = {};
   try {
     payload = event.data?.json() ?? {};
   } catch {
     payload = {};
   }
   event.waitUntil(
-    self.registration.showNotification(payload.title ?? "OKLE", {
-      body: payload.body ?? "¿Ya registraste los movimientos de hoy?",
-      icon: "/icons/icon-192.png",
-      badge: "/icons/icon-192.png",
-      tag: payload.tag ?? "daily-expenses",
-      data: { url: payload.url ?? "/transactions?action=new" },
-    }),
+    Promise.all([
+      self.registration.showNotification(payload.title ?? "OKLE", {
+        body: payload.body ?? "¿Ya registraste los movimientos de hoy?",
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+        tag: payload.tag ?? "daily-expenses",
+        data: { url: payload.url ?? "/transactions?action=new" },
+      }),
+      "setAppBadge" in self.navigator
+        ? (
+            self.navigator as Navigator & {
+              setAppBadge(count?: number): Promise<void>;
+            }
+          ).setAppBadge(payload.badgeCount ?? 0)
+        : Promise.resolve(),
+    ]).then(() => undefined),
   );
 });
 

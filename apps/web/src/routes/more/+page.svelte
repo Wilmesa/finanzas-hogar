@@ -20,6 +20,8 @@
   let newPassword = $state("");
   let confirmPassword = $state("");
   let news = $state<Array<{ source: string; sourceUrl: string; title: string; factSummary: string; publishedAt: string }>>([]);
+  let newsSources = $state<Array<{ source: string; ok: boolean; imported: number; error?: string }>>([]);
+  let refreshingNews = $state(false);
   let categoryName = $state("");
   let categoryIcon = $state("tag");
   let categoryColor = $state("#123C69");
@@ -30,10 +32,24 @@
     try {
       const result = await apiRequest<typeof news>("/v1/news");
       if (result.length) news = result;
+      newsSources = (await apiRequest<{ sources: typeof newsSources }>("/v1/news/status")).sources;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "No fue posible actualizar noticias";
     }
   });
+
+  async function refreshNews() {
+    refreshingNews = true;
+    error = "";
+    try {
+      const result = await apiRequest<{ sources: typeof newsSources }>("/v1/news/refresh", { method: "POST" });
+      newsSources = result.sources;
+      news = await apiRequest<typeof news>("/v1/news");
+      message = `Noticias actualizadas desde ${newsSources.filter((source) => source.ok).length} fuentes.`;
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible actualizar noticias";
+    } finally { refreshingNews = false; }
+  }
 
   function downloadExport() {
     const blob = new Blob([exportFinanceData()], { type: "application/json" });
@@ -143,10 +159,11 @@
       </form>
     </details>
   {/if}
+  <section class="panel news-control"><div><span class="eyebrow">Colombia, región y mundo</span><h2>Noticias financieras verificadas</h2><p>Fuentes oficiales nacionales, RSS regionales configurables y mercados globales.</p></div>{#if $financeData.settings.memberRole === "owner"}<button class="secondary-button" disabled={refreshingNews} onclick={refreshNews}>{refreshingNews ? "Actualizando…" : "Actualizar ahora"}</button>{/if}<div class="news-source-status">{#each newsSources as source}<span class:failed={!source.ok}>{source.ok ? "●" : "×"} {source.source} · {source.imported}</span>{/each}</div></section>
   <section class="news-layout">
     {#if news[0]}<article class="featured-news"><span class="eyebrow">{news[0].source} · {new Date(news[0].publishedAt).toLocaleDateString("es-CO")}</span><h2>{news[0].title}</h2><p><strong>Hecho publicado:</strong> {news[0].factSummary}</p><a href={news[0].sourceUrl} target="_blank" rel="noreferrer">Abrir fuente original ↗</a></article>{:else}<article class="featured-news empty-news"><span class="eyebrow">Contexto económico</span><h2>Sin noticias verificadas</h2><p>Cuando la ingesta encuentre fuentes oficiales, aparecerán aquí con fecha y enlace original.</p></article>{/if}
     <div class="settings-list">
-      <a href="/copilot"><span class="settings-icon">✦</span><span><strong>AI-CFO</strong><small>Estado, análisis y evidencia</small></span><b>›</b></a>
+      <a href="/copilot"><span class="settings-icon">✦</span><span><strong>Asesor OKLE</strong><small>Conversación, análisis y evidencia</small></span><b>›</b></a>
       <a href="/household"><span class="settings-icon">♙</span><span><strong>Hogar y perfiles</strong><small>{$financeData.members.length} miembros · {$financeData.settings.baseCurrency}</small></span><b>›</b></a>
       <a href="/accounts"><span class="settings-icon">◇</span><span><strong>Cuentas y tarjetas</strong><small>Libros compartido y privado en Firefly</small></span><b>›</b></a>
       <a href="/pockets"><span class="settings-icon">◎</span><span><strong>Bolsillos</strong><small>Propósitos, metas y privacidad</small></span><b>›</b></a>
