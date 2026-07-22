@@ -8,6 +8,7 @@ import {
   AccountsController,
   AnalyticsController,
   AutomationController,
+  CategoriesController,
   CheckInController,
   HealthController,
   HouseholdController,
@@ -33,6 +34,7 @@ import { LocalAuthService } from "./local-auth.service.js";
 import { RedisService } from "./redis.service.js";
 import { SessionStore } from "./session-store.js";
 import { HouseholdService } from "./household.service.js";
+import { CategoriesService } from "./categories.service.js";
 
 @Module({
   controllers: [
@@ -43,6 +45,7 @@ import { HouseholdService } from "./household.service.js";
     PlanningController,
     ProjectionsController,
     TransactionsController,
+    CategoriesController,
     AllocationController,
     AiCfoController,
     AnalyticsController,
@@ -68,6 +71,7 @@ import { HouseholdService } from "./household.service.js";
     LocalAuthService,
     AuthenticationService,
     HouseholdService,
+    CategoriesService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

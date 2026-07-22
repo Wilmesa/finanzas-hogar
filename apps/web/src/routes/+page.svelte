@@ -17,12 +17,12 @@
   const transactions = $derived($financeData.transactions);
   const available = $derived(
     pockets
-      .filter((pocket) => pocket.visibility === "household" && pocket.currency === "COP")
+      .filter((pocket) => pocket.visibility === "household" && pocket.currency === $financeData.settings.baseCurrency)
       .reduce((sum, pocket) => sum + pocket.currentAmount, 0),
   );
   const monthlySpent = $derived(
     transactions
-      .filter((transaction) => transaction.kind === "expense" && transaction.currency === "COP")
+      .filter((transaction) => transaction.kind === "expense" && transaction.currency === $financeData.settings.baseCurrency)
       .reduce((sum, transaction) => sum + transaction.amount, 0),
   );
   const dailyPocket = $derived(pockets.find((pocket) => pocket.id === "daily"));
@@ -139,7 +139,7 @@
       <label>¿De qué bolsillo?<select bind:value={pocketId}>{#each pockets as pocket}<option value={pocket.id}>{pocket.name} · {pocket.visibility === "private" ? "Solo yo" : "Compartido"}</option>{/each}</select></label>
       <label>Cuenta o tarjeta<select bind:value={accountId}>{#each $financeData.accounts.filter((account) => account.scope === (pockets.find((pocket) => pocket.id === pocketId)?.visibility ?? pockets[0]?.visibility)) as account}<option value={account.id}>{account.name} · {account.currency}</option>{/each}</select>{#if !$financeData.accounts.some((account) => account.scope === (pockets.find((pocket) => pocket.id === pocketId)?.visibility ?? pockets[0]?.visibility))}<small>No hay cuentas en este alcance. <a href="/accounts">Crear cuenta</a></small>{/if}</label>
       <label>Comercio o descripción<input placeholder="Ej. mercado semanal" bind:value={merchant} /></label>
-      <div class="form-row"><label>Categoría<select bind:value={category}><option>Mercado</option><option>Transporte</option><option>Restaurantes</option><option>Vivienda</option><option>Salud</option><option>Otros</option></select></label><label>Pagó<select bind:value={payerMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label></div>
+      <div class="form-row"><label>Categoría<select bind:value={category}>{#each $financeData.categories as item}<option value={item.name}>{item.name}</option>{/each}</select></label><label>Pagó<select bind:value={payerMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label></div>
       {#if formError}<p class="form-error" role="alert">{formError}</p>{/if}
       <button class="primary-button" disabled={saving} onclick={saveTransaction}>{saving ? "Guardando…" : "Guardar gasto"}</button>
     </div>

@@ -52,7 +52,7 @@
   <header class="page-header">
     <div>
       <span class="eyebrow">Primeros pasos</span>
-      <h1>Prepara FinNest</h1>
+      <h1>Prepara OKLE</h1>
       <p>Comprueba el hogar, los libros contables y el primer plan sin exponer tokens en el navegador.</p>
     </div>
   </header>
@@ -69,6 +69,6 @@
         </a>
       {/each}
     </div>
-    <button class="primary-button" disabled={completing} onclick={complete}>{completing ? "Guardando…" : "Terminar y abrir FinNest"}</button>
+    <button class="primary-button" disabled={completing} onclick={complete}>{completing ? "Guardando…" : "Terminar y abrir OKLE"}</button>
   {/if}
 </div>

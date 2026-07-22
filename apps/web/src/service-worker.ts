@@ -4,8 +4,8 @@ import { build, files, version } from "$service-worker";
 
 declare const self: ServiceWorkerGlobalScope;
 
-const STATIC_CACHE = `finnest-static-${version}`;
-const PAGE_CACHE = `finnest-pages-${version}`;
+const STATIC_CACHE = `okle-static-${version}`;
+const PAGE_CACHE = `okle-pages-${version}`;
 const PRECACHE = [...build, ...files].filter(
   (path) =>
     !path.endsWith(".map") &&
@@ -30,7 +30,8 @@ self.addEventListener("activate", (event) => {
             .filter(
               (key) =>
                 (key.startsWith("nuestro-dinero-") ||
-                  key.startsWith("finnest-")) &&
+                  key.startsWith("finnest-") ||
+                  key.startsWith("okle-")) &&
                 key !== STATIC_CACHE &&
                 key !== PAGE_CACHE,
             )
@@ -67,7 +68,7 @@ self.addEventListener("fetch", (event) => {
           const home = await caches.match("/");
           if (home) return home;
           return new Response(
-            "<!doctype html><html lang='es'><meta name='viewport' content='width=device-width'><title>FinNest sin conexión</title><style>body{font:16px system-ui;background:#f8fafc;color:#0f172a;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}main{max-width:32rem}button{padding:12px 18px;border:0;border-radius:999px;background:#059669;color:white}</style><main><h1>Estás sin conexión</h1><p>FinNest no guarda respuestas financieras en caché. Recupera la conexión para sincronizar con Firefly.</p><button onclick='location.reload()'>Reintentar</button></main>",
+            "<!doctype html><html lang='es'><meta name='viewport' content='width=device-width'><title>OKLE sin conexión</title><style>body{font:16px Inter,system-ui;background:#f7f8fa;color:#16202a;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}main{max-width:32rem}button{padding:12px 18px;border:0;border-radius:999px;background:#123c69;color:white}</style><main><h1>Estás sin conexión</h1><p>OKLE no guarda respuestas financieras en caché. Recupera la conexión para sincronizar con Firefly.</p><button onclick='location.reload()'>Reintentar</button></main>",
             { headers: { "Content-Type": "text/html; charset=utf-8" } },
           );
         }),
@@ -104,7 +105,7 @@ self.addEventListener("push", (event) => {
     payload = {};
   }
   event.waitUntil(
-    self.registration.showNotification(payload.title ?? "FinNest", {
+    self.registration.showNotification(payload.title ?? "OKLE", {
       body: payload.body ?? "¿Ya registraste los movimientos de hoy?",
       icon: "/icons/icon-192.png",
       badge: "/icons/icon-192.png",

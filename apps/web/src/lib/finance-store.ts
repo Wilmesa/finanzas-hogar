@@ -10,6 +10,8 @@ import type {
   AccountView,
   AccountConnectionView,
   AiStatusView,
+  CategoryView,
+  ChatMessageView,
   ExpectedIncomeView,
   FinanceState,
   FundingPlanView,
@@ -21,7 +23,36 @@ import type {
   TransactionView,
 } from "./types";
 
-const STORAGE_KEY = "finnest:v3";
+const STORAGE_KEY = "okle:v3";
+const LEGACY_STORAGE_KEY = "finnest:v3";
+const defaultCategories: CategoryView[] = [
+  {
+    id: "category-market",
+    name: "Mercado",
+    icon: "shopping-cart",
+    color: "#123C69",
+  },
+  {
+    id: "category-transport",
+    name: "Transporte",
+    icon: "bus",
+    color: "#4C8DFF",
+  },
+  {
+    id: "category-restaurants",
+    name: "Restaurantes",
+    icon: "utensils",
+    color: "#B9862E",
+  },
+  { id: "category-home", name: "Vivienda", icon: "home", color: "#6B7280" },
+  {
+    id: "category-health",
+    name: "Salud",
+    icon: "heart-pulse",
+    color: "#D64550",
+  },
+  { id: "category-other", name: "Otros", icon: "tag", color: "#5B6B79" },
+];
 const demoInitial: FinanceState = {
   schemaVersion: 3,
   pockets: structuredClone(demoPockets),
@@ -65,6 +96,7 @@ const demoInitial: FinanceState = {
     },
   ],
   insights: [],
+  categories: structuredClone(defaultCategories),
   aiStatus: {
     status: "demo",
     provider: "deterministic",
@@ -176,6 +208,7 @@ const serverInitial: FinanceState = {
   accountConnections: [],
   members: [],
   insights: [],
+  categories: [],
   aiStatus: {
     status: "unknown",
     provider: "disabled",
@@ -202,7 +235,9 @@ const initial = browser && isServerMode() ? serverInitial : demoInitial;
 
 function readLocal(): FinanceState {
   if (!browser) return initial;
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const raw =
+    localStorage.getItem(STORAGE_KEY) ??
+    localStorage.getItem(LEGACY_STORAGE_KEY);
   if (!raw) return initial;
   try {
     const parsed = JSON.parse(raw) as Omit<
@@ -217,6 +252,7 @@ function readLocal(): FinanceState {
       ...parsed,
       schemaVersion: 3,
       accounts: parsed.accounts ?? initial.accounts,
+      categories: parsed.categories ?? initial.categories,
       accountConnections:
         parsed.accountConnections ?? initial.accountConnections,
       members: parsed.members ?? initial.members,
@@ -279,6 +315,7 @@ function serverIncomeSourceToView(
       ? { defaultAmount: Number(item.defaultAmount) }
       : {}),
     ...(item.description ? { description: String(item.description) } : {}),
+    ...(item.updatedAt ? { updatedAt: String(item.updatedAt) } : {}),
   };
 }
 
@@ -301,6 +338,7 @@ function serverExpectedIncomeToView(
     reason: String(item.reason),
     ...(item.notes ? { notes: String(item.notes) } : {}),
     timeBucket: item.timeBucket as ExpectedIncomeView["timeBucket"],
+    ...(item.updatedAt ? { updatedAt: String(item.updatedAt) } : {}),
   };
 }
 
@@ -322,6 +360,7 @@ function serverFundingPlanToView(
       ? { targetDate: String(item.targetDate).slice(0, 10) }
       : {}),
     version: Number(item.version),
+    ...(item.updatedAt ? { updatedAt: String(item.updatedAt) } : {}),
     allocations: allocations.map((allocation) => {
       const income = allocation.expectedIncome as Record<string, unknown>;
       const source = income.source as Record<string, unknown>;
@@ -357,6 +396,7 @@ export async function hydrateFinanceData(): Promise<void> {
     household,
     insights,
     aiStatus,
+    categories,
   ] = await Promise.all([
     apiRequest<Record<string, unknown>[]>("/v1/pockets"),
     apiRequest<Record<string, unknown>[]>("/v1/transactions"),
@@ -368,6 +408,7 @@ export async function hydrateFinanceData(): Promise<void> {
     apiRequest<Record<string, unknown>>("/v1/household"),
     apiRequest<InsightView[]>("/v1/insights"),
     apiRequest<AiStatusView>("/v1/ai-cfo/status"),
+    apiRequest<CategoryView[]>("/v1/categories"),
   ]);
   const planningSources = (planning.sources ?? []) as Record<string, unknown>[];
   const planningIncomes = (planning.incomes ?? []) as Record<string, unknown>[];
@@ -397,6 +438,7 @@ export async function hydrateFinanceData(): Promise<void> {
     ),
     insights,
     aiStatus,
+    categories,
     settings: {
       ...state.settings,
       memberName:
@@ -507,6 +549,96 @@ export async function createPocket(input: {
   return pocket.id;
 }
 
+export async function updatePocket(
+  pocket: PocketView,
+  input: {
+    name: string;
+    purpose: string;
+    visibility: PocketView["visibility"];
+    targetAmount: number;
+    policyKind: NonNullable<PocketView["policyKind"]>;
+    targetDate?: string;
+    monthlyContribution?: number;
+  },
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      pockets: state.pockets.map((item) =>
+        item.id === pocket.id
+          ? { ...item, ...input, version: (item.version ?? 1) + 1 }
+          : item,
+      ),
+    }));
+    return;
+  }
+  const policy =
+    input.policyKind === "target_by_date"
+      ? {
+          kind: input.policyKind,
+          targetAmount: String(input.targetAmount),
+          targetDate: input.targetDate,
+          frequency: "monthly",
+        }
+      : input.policyKind === "target_by_contribution"
+        ? {
+            kind: input.policyKind,
+            targetAmount: String(input.targetAmount),
+            contributionAmount: String(input.monthlyContribution),
+            frequency: "monthly",
+          }
+        : {
+            kind: input.policyKind,
+            limit: String(input.targetAmount),
+            period: "monthly",
+          };
+  await apiRequest(`/v1/pockets/${pocket.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: input.name,
+      purpose: input.purpose,
+      visibility: input.visibility,
+      policy,
+      version: pocket.version ?? 1,
+    }),
+  });
+  await hydrateFinanceData();
+}
+
+export async function archivePocket(
+  pocket: PocketView,
+  input: {
+    disposition?: "transfer" | "release";
+    destinationPocketId?: string;
+  },
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => {
+      const destination = input.destinationPocketId;
+      return {
+        ...state,
+        pockets: state.pockets
+          .filter((item) => item.id !== pocket.id)
+          .map((item) =>
+            destination === item.id
+              ? {
+                  ...item,
+                  currentAmount: item.currentAmount + pocket.currentAmount,
+                }
+              : item,
+          ),
+      };
+    });
+    return;
+  }
+  await apiRequest(`/v1/pockets/${pocket.id}`, {
+    method: "DELETE",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify(input),
+  });
+  await hydrateFinanceData();
+}
+
 export async function createTransaction(input: {
   amount: number;
   pocketId: string;
@@ -581,6 +713,28 @@ export async function createTransaction(input: {
   }));
 }
 
+export async function updateTransaction(
+  transactionId: string,
+  input: { merchant: string; category: string },
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      transactions: state.transactions.map((transaction) =>
+        transaction.id === transactionId
+          ? { ...transaction, ...input }
+          : transaction,
+      ),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/transactions/${transactionId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  await hydrateFinanceData();
+}
+
 export async function allocateToPocket(
   pocketId: string,
   amount: number,
@@ -621,7 +775,10 @@ export async function setPocketStatus(
     return;
   }
   if (status === "archived") {
-    await apiRequest(`/v1/pockets/${pocket.id}`, { method: "DELETE" });
+    await archivePocket(pocket, {
+      ...(pocket.currentAmount > 0 ? { disposition: "release" as const } : {}),
+    });
+    return;
   } else {
     await apiRequest(`/v1/pockets/${pocket.id}`, {
       method: "PATCH",
@@ -700,6 +857,59 @@ export async function archiveAccount(account: AccountView): Promise<void> {
   await apiRequest(`/v1/accounts/${account.scope}/${account.id}`, {
     method: "DELETE",
   });
+  await hydrateFinanceData();
+}
+
+export async function createCategory(input: {
+  name: string;
+  icon: string;
+  color: string;
+}): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      categories: [{ id: crypto.randomUUID(), ...input }, ...state.categories],
+    }));
+    return;
+  }
+  await apiRequest("/v1/categories", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  await hydrateFinanceData();
+}
+
+export async function updateCategory(
+  categoryId: string,
+  input: { name: string; icon: string; color: string },
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      categories: state.categories.map((category) =>
+        category.id === categoryId ? { ...category, ...input } : category,
+      ),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/categories/${categoryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  await hydrateFinanceData();
+}
+
+export async function archiveCategory(categoryId: string): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      categories: state.categories.filter(
+        (category) => category.id !== categoryId,
+      ),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/categories/${categoryId}`, { method: "DELETE" });
   await hydrateFinanceData();
 }
 
@@ -827,6 +1037,36 @@ export async function generateInsight(
   await hydrateFinanceData();
 }
 
+export async function loadChat(
+  scope: "household" | "private",
+): Promise<ChatMessageView[]> {
+  if (!isServerMode()) return [];
+  return apiRequest<ChatMessageView[]>(`/v1/ai-cfo/chat?scope=${scope}`);
+}
+
+export async function sendChatMessage(
+  message: string,
+  scope: "household" | "private",
+): Promise<ChatMessageView> {
+  if (!message.trim()) throw new Error("Escribe una pregunta");
+  if (!isServerMode()) {
+    return {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content:
+        "El chat conversacional necesita el servicio AI-CFO. En la demostración local puedes usar “Generar análisis” para probar el motor determinístico.",
+      createdAt: new Date().toISOString(),
+      provider: "deterministic",
+      model: "local-demo",
+      citations: [],
+    };
+  }
+  return apiRequest<ChatMessageView>("/v1/ai-cfo/chat", {
+    method: "POST",
+    body: JSON.stringify({ message: message.trim(), scope }),
+  });
+}
+
 function localTimeBucket(
   expectedDate: string,
 ): ExpectedIncomeView["timeBucket"] {
@@ -919,6 +1159,58 @@ export async function createIncomeSource(input: {
   return source.id;
 }
 
+export async function updateIncomeSource(
+  sourceId: string,
+  input: Partial<{
+    name: string;
+    kind: string;
+    visibility: "household" | "private";
+    currency: string;
+    recurrence: string;
+    defaultAmount: number;
+    description: string;
+  }>,
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      incomeSources: state.incomeSources.map((source) =>
+        source.id === sourceId
+          ? { ...source, ...input, updatedAt: new Date().toISOString() }
+          : source,
+      ),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/planning/income-sources/${sourceId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      ...input,
+      defaultAmount:
+        input.defaultAmount === undefined
+          ? undefined
+          : String(input.defaultAmount),
+    }),
+  });
+  await hydrateFinanceData();
+}
+
+export async function archiveIncomeSource(sourceId: string): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      incomeSources: state.incomeSources.filter(
+        (source) => source.id !== sourceId,
+      ),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/planning/income-sources/${sourceId}`, {
+    method: "DELETE",
+  });
+  await hydrateFinanceData();
+}
+
 export async function createExpectedIncome(input: {
   sourceId: string;
   expectedDate: string;
@@ -987,6 +1279,82 @@ export async function createExpectedIncome(input: {
     ),
   }));
   return income.id;
+}
+
+export async function updateExpectedIncome(
+  incomeId: string,
+  input: Partial<{
+    sourceId: string;
+    expectedDate: string;
+    expectedAmount: number;
+    probability: number;
+    status: ExpectedIncomeView["status"];
+    actualAmount: number | null;
+    reason: string;
+    notes: string;
+  }>,
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      expectedIncomes: state.expectedIncomes.map((income) =>
+        income.id === incomeId
+          ? {
+              ...income,
+              ...input,
+              actualAmount:
+                input.actualAmount === null
+                  ? undefined
+                  : (input.actualAmount ?? income.actualAmount),
+              timeBucket: input.expectedDate
+                ? localTimeBucket(input.expectedDate)
+                : income.timeBucket,
+              updatedAt: new Date().toISOString(),
+            }
+          : income,
+      ),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/planning/expected-incomes/${incomeId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      ...input,
+      expectedAmount:
+        input.expectedAmount === undefined
+          ? undefined
+          : String(input.expectedAmount),
+      actualAmount:
+        input.actualAmount === undefined
+          ? undefined
+          : input.actualAmount === null
+            ? null
+            : String(input.actualAmount),
+    }),
+  });
+  await hydrateFinanceData();
+}
+
+export async function cancelExpectedIncome(incomeId: string): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      expectedIncomes: state.expectedIncomes.map((income) =>
+        income.id === incomeId
+          ? {
+              ...income,
+              status: "cancelled",
+              updatedAt: new Date().toISOString(),
+            }
+          : income,
+      ),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/planning/expected-incomes/${incomeId}`, {
+    method: "DELETE",
+  });
+  await hydrateFinanceData();
 }
 
 export async function createFundingPlan(input: {
@@ -1219,7 +1587,7 @@ export async function importFinanceData(raw: string): Promise<void> {
     !Array.isArray(parsed.pockets) ||
     !Array.isArray(parsed.transactions)
   ) {
-    throw new Error("El archivo no pertenece a FinNest o usa otra versión");
+    throw new Error("El archivo no pertenece a OKLE o usa otra versión");
   }
   if (isServerMode()) {
     const pocketIds = new Map<string, string>();

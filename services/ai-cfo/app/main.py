@@ -3,11 +3,11 @@ import os
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-from .models import InsightBundle, InsightSnapshot
+from .models import ChatRequest, ChatResponse, InsightBundle, InsightSnapshot
 from .provider import provider_from_environment
 from .validator import validate_bundle
 
-app = FastAPI(title="FinNest AI-CFO", version="0.1.0")
+app = FastAPI(title="OKLE AI-CFO", version="0.2.0")
 
 
 def internal_auth(x_internal_token: str | None = Header(default=None)) -> None:
@@ -52,3 +52,10 @@ async def generate_insights(snapshot: InsightSnapshot) -> InsightBundle:
     provider = provider_from_environment()
     result = await provider.generate(snapshot)
     return validate_bundle(result, snapshot)
+
+
+@app.post("/internal/v1/chat", response_model=ChatResponse, dependencies=[Depends(internal_auth)])
+async def chat(request: ChatRequest) -> ChatResponse:
+    if os.getenv("AI_PROVIDER", "disabled").lower() == "disabled":
+        raise HTTPException(status_code=503, detail="AI-CFO is disabled")
+    return await provider_from_environment().chat(request)

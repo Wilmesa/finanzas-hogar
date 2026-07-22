@@ -1,6 +1,14 @@
 <script lang="ts">
-  import { allocateToPocket, createPocket, financeData, setPocketStatus } from "$lib/finance-store";
+  import {
+    allocateToPocket,
+    archivePocket,
+    createPocket,
+    financeData,
+    setPocketStatus,
+    updatePocket,
+  } from "$lib/finance-store";
   import PocketCard from "$lib/PocketCard.svelte";
+  import type { PocketView } from "$lib/types";
   let filter = $state<"all" | "household" | "private">("all");
   let creating = $state(false);
   let name = $state("");
@@ -16,6 +24,17 @@
   let allocatingPocketId = $state<string | null>(null);
   let allocationAmount = $state<number | undefined>();
   let actionError = $state("");
+  let editingPocket = $state<PocketView | null>(null);
+  let editName = $state("");
+  let editPurpose = $state("");
+  let editTargetAmount = $state<number | undefined>();
+  let editPolicyKind = $state<NonNullable<PocketView["policyKind"]>>("target_by_date");
+  let editTargetDate = $state("");
+  let editMonthlyContribution = $state<number | undefined>();
+  let editPrivate = $state(false);
+  let archivingPocket = $state<PocketView | null>(null);
+  let archiveDisposition = $state<"transfer" | "release">("transfer");
+  let destinationPocketId = $state("");
   const pockets = $derived($financeData.pockets);
   const visible = $derived(filter === "all" ? pockets : pockets.filter((pocket) => pocket.visibility === filter));
 
@@ -64,6 +83,77 @@
     try { await setPocketStatus(pocket, status); }
     catch (cause) { actionError = cause instanceof Error ? cause.message : "No pudimos actualizar el bolsillo"; }
   }
+
+  function beginEdit(pocket: PocketView) {
+    editingPocket = pocket;
+    editName = pocket.name;
+    editPurpose = pocket.purpose;
+    editTargetAmount = pocket.targetAmount;
+    editPolicyKind = pocket.policyKind ?? "target_by_date";
+    editTargetDate = pocket.targetDate ?? "";
+    editMonthlyContribution = pocket.monthlyContribution;
+    editPrivate = pocket.visibility === "private";
+  }
+
+  async function saveEdit() {
+    if (!editingPocket || !editName.trim() || !editTargetAmount) return;
+    saving = true;
+    actionError = "";
+    try {
+      await updatePocket(editingPocket, {
+        name: editName.trim(),
+        purpose: editPurpose,
+        visibility: editPrivate ? "private" : "household",
+        targetAmount: editTargetAmount,
+        policyKind: editPolicyKind,
+        targetDate: editTargetDate || undefined,
+        monthlyContribution: editMonthlyContribution,
+      });
+      editingPocket = null;
+    } catch (cause) {
+      actionError = cause instanceof Error ? cause.message : "No pudimos guardar los cambios";
+    } finally {
+      saving = false;
+    }
+  }
+
+  function beginArchive(pocket: PocketView) {
+    archivingPocket = pocket;
+    archiveDisposition = "transfer";
+    destinationPocketId = pockets.find(
+      (candidate) =>
+        candidate.id !== pocket.id &&
+        candidate.status === "active" &&
+        candidate.currency === pocket.currency &&
+        candidate.visibility === pocket.visibility,
+    )?.id ?? "";
+  }
+
+  async function confirmArchive() {
+    if (!archivingPocket) return;
+    if (
+      archivingPocket.currentAmount > 0 &&
+      archiveDisposition === "transfer" &&
+      !destinationPocketId
+    ) {
+      actionError = "Selecciona un bolsillo compatible o devuelve el saldo al balance general.";
+      return;
+    }
+    saving = true;
+    try {
+      await archivePocket(archivingPocket, {
+        ...(archivingPocket.currentAmount > 0 ? { disposition: archiveDisposition } : {}),
+        ...(archiveDisposition === "transfer" && destinationPocketId
+          ? { destinationPocketId }
+          : {}),
+      });
+      archivingPocket = null;
+    } catch (cause) {
+      actionError = cause instanceof Error ? cause.message : "No pudimos archivar el bolsillo";
+    } finally {
+      saving = false;
+    }
+  }
 </script>
 
 <div class="page">
@@ -91,7 +181,7 @@
     </section>
   {/if}
   {#if actionError}<p class="form-error" role="alert">{actionError}</p>{/if}
-  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} /><div class="pocket-actions"><button onclick={() => (allocatingPocketId = pocket.id)}>＋ Aportar</button><button onclick={() => changeStatus(pocket, pocket.status === "paused" ? "active" : "paused")}>{pocket.status === "paused" ? "Reanudar" : "Pausar"}</button><button onclick={() => confirm(`¿Archivar ${pocket.name}?`) && changeStatus(pocket, "archived")}>Archivar</button></div></div>{/each}</div>
+  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} /><div class="pocket-actions"><button onclick={() => (allocatingPocketId = pocket.id)}>Aportar</button><button onclick={() => beginEdit(pocket)}>Editar</button><button onclick={() => changeStatus(pocket, pocket.status === "paused" ? "active" : "paused")}>{pocket.status === "paused" ? "Reanudar" : "Pausar"}</button><button class="danger-text" onclick={() => beginArchive(pocket)}>Archivar</button></div></div>{/each}</div>
   {#if visible.length === 0}<div class="empty-state panel"><strong>No hay bolsillos en esta vista</strong><p>Crea uno compartido o privado para reservar dinero con propósito.</p></div>{/if}
   <button class="fab mobile-only" onclick={() => (creating = !creating)}><span>＋</span> Nuevo</button>
 </div>
@@ -103,6 +193,41 @@
       <label>Cantidad<input type="number" min="1" bind:value={allocationAmount} /></label>
       <p class="privacy-note">Este aporte reserva dinero dentro de la app; no crea una transferencia bancaria.</p>
       <button class="primary-button" onclick={applyAllocation}>Guardar aporte</button>
+    </div>
+  </div>
+{/if}
+
+{#if editingPocket}
+  <div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && (editingPocket = null)}>
+    <div class="quick-entry" role="dialog" aria-modal="true" aria-labelledby="edit-pocket-title">
+      <header><div><span class="eyebrow">Cambios trazables</span><h2 id="edit-pocket-title">Editar bolsillo</h2></div><button class="icon-button" onclick={() => (editingPocket = null)} aria-label="Cerrar">×</button></header>
+      <div class="form-grid">
+        <label>Nombre<input bind:value={editName} /></label>
+        <label>Tipo<select bind:value={editPurpose}><option value="daily_spend">Vida diaria</option><option value="sinking_fund">Ahorro</option><option value="purchase">Compra</option><option value="debt">Deuda</option><option value="investment">Inversión</option><option value="real_estate">Inmueble</option><option value="custom">Otro</option></select></label>
+        <label>Meta o límite<input type="number" min="1" bind:value={editTargetAmount} /></label>
+        <label>Regla<select bind:value={editPolicyKind}><option value="target_by_date">Meta por fecha</option><option value="target_by_contribution">Meta por aporte</option><option value="periodic_spend">Límite mensual</option></select></label>
+        {#if editPolicyKind === "target_by_date"}<label>Fecha límite<input type="date" bind:value={editTargetDate} /></label>{/if}
+        {#if editPolicyKind === "target_by_contribution"}<label>Aporte mensual<input type="number" min="1" bind:value={editMonthlyContribution} /></label>{/if}
+      </div>
+      <label class="switch-row"><input type="checkbox" bind:checked={editPrivate} /> Solo yo</label>
+      <button class="primary-button" disabled={saving} onclick={saveEdit}>{saving ? "Guardando…" : "Guardar cambios"}</button>
+    </div>
+  </div>
+{/if}
+
+{#if archivingPocket}
+  <div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && (archivingPocket = null)}>
+    <div class="quick-entry compact" role="dialog" aria-modal="true" aria-labelledby="archive-pocket-title">
+      <header><div><span class="eyebrow">Archivo seguro</span><h2 id="archive-pocket-title">Archivar {archivingPocket.name}</h2></div><button class="icon-button" onclick={() => (archivingPocket = null)} aria-label="Cerrar">×</button></header>
+      {#if archivingPocket.currentAmount > 0}
+        <p>Este bolsillo conserva {archivingPocket.currentAmount.toLocaleString("es-CO")} {archivingPocket.currency}. Elige qué hacer con ese saldo.</p>
+        <label><input type="radio" bind:group={archiveDisposition} value="transfer" /> Mover a otro bolsillo</label>
+        {#if archiveDisposition === "transfer"}<label>Destino<select bind:value={destinationPocketId}><option value="">Seleccionar…</option>{#each pockets.filter((candidate) => candidate.id !== archivingPocket?.id && candidate.status === "active" && candidate.currency === archivingPocket?.currency && candidate.visibility === archivingPocket?.visibility) as candidate}<option value={candidate.id}>{candidate.name}</option>{/each}</select></label>{/if}
+        <label><input type="radio" bind:group={archiveDisposition} value="release" /> Devolver al balance general</label>
+      {:else}
+        <p>El bolsillo no tiene saldo reservado. Se ocultará de las vistas activas.</p>
+      {/if}
+      <button class="danger-button" disabled={saving} onclick={confirmArchive}>{saving ? "Archivando…" : "Confirmar archivo"}</button>
     </div>
   </div>
 {/if}

@@ -57,6 +57,11 @@ const IncomeSourceInput = z.object({
   description: z.string().trim().max(500).optional(),
 });
 
+const IncomeSourcePatch = IncomeSourceInput.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  "Debes enviar al menos un cambio",
+);
+
 const ExpectedIncomeInput = z.object({
   sourceId: z.string().min(1),
   expectedDate: DateOnly,
@@ -67,6 +72,19 @@ const ExpectedIncomeInput = z.object({
   notes: z.string().trim().max(1000).optional(),
   repeatUntil: DateOnly.optional(),
 });
+
+const ExpectedIncomePatch = ExpectedIncomeInput.omit({ repeatUntil: true })
+  .partial()
+  .extend({
+    status: z
+      .enum(["planned", "confirmed", "received", "cancelled"])
+      .optional(),
+    actualAmount: PositiveMoney.nullable().optional(),
+  })
+  .refine(
+    (value) => Object.keys(value).length > 0,
+    "Debes enviar al menos un cambio",
+  );
 
 const AllocationInput = z
   .object({
@@ -202,6 +220,88 @@ export class PlanningService {
     });
   }
 
+  async updateSource(id: string, raw: unknown, actor: Actor) {
+    const parsed = IncomeSourcePatch.safeParse(raw);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    const existing = await this.prisma.incomeSource.findUnique({
+      where: { id },
+      include: { _count: { select: { expectedIncomes: true } } },
+    });
+    if (!existing || !this.canRead(existing, actor))
+      throw new NotFoundException();
+    if (existing.ownerMemberId !== actor.memberId && actor.role !== "owner") {
+      throw new NotFoundException();
+    }
+    if (
+      parsed.data.currency &&
+      parsed.data.currency !== existing.currency &&
+      existing._count.expectedIncomes > 0
+    ) {
+      throw new ConflictException(
+        "No puedes cambiar la moneda de una fuente que ya tiene ingresos esperados",
+      );
+    }
+    const updated = await this.prisma.incomeSource.update({
+      where: { id },
+      data: {
+        ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+        ...(parsed.data.kind !== undefined ? { kind: parsed.data.kind } : {}),
+        ...(parsed.data.visibility !== undefined
+          ? { visibility: parsed.data.visibility }
+          : {}),
+        ...(parsed.data.currency !== undefined
+          ? { currency: parsed.data.currency }
+          : {}),
+        ...(parsed.data.recurrence !== undefined
+          ? { recurrence: parsed.data.recurrence }
+          : {}),
+        ...(parsed.data.description !== undefined
+          ? { description: parsed.data.description }
+          : {}),
+        ...(parsed.data.defaultAmount !== undefined
+          ? {
+              defaultAmount: parsed.data.defaultAmount
+                ? new Prisma.Decimal(parsed.data.defaultAmount)
+                : null,
+            }
+          : {}),
+      },
+    });
+    await this.recordAudit(
+      actor,
+      "IncomeSource",
+      id,
+      "updated",
+      existing,
+      updated,
+    );
+    return updated;
+  }
+
+  async archiveSource(id: string, actor: Actor) {
+    const existing = await this.prisma.incomeSource.findUnique({
+      where: { id },
+    });
+    if (!existing || !this.canRead(existing, actor))
+      throw new NotFoundException();
+    if (existing.ownerMemberId !== actor.memberId && actor.role !== "owner") {
+      throw new NotFoundException();
+    }
+    const updated = await this.prisma.incomeSource.update({
+      where: { id },
+      data: { active: false },
+    });
+    await this.recordAudit(
+      actor,
+      "IncomeSource",
+      id,
+      "archived",
+      existing,
+      updated,
+    );
+    return updated;
+  }
+
   async createExpectedIncome(raw: unknown, actor: Actor) {
     const parsed = ExpectedIncomeInput.safeParse(raw);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
@@ -250,6 +350,111 @@ export class PlanningService {
     const first = created[0];
     if (!first) throw new BadRequestException("No se generaron ocurrencias");
     return { ...first, seriesCreated: created.length };
+  }
+
+  async updateExpectedIncome(id: string, raw: unknown, actor: Actor) {
+    const parsed = ExpectedIncomePatch.safeParse(raw);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    const existing = await this.expectedIncomeForActor(id, actor);
+    await this.ensureIncomeCanChange(id);
+    const sourceId = parsed.data.sourceId ?? existing.sourceId;
+    const source = await this.prisma.incomeSource.findUnique({
+      where: { id: sourceId },
+    });
+    if (!source || !this.canRead(source, actor)) throw new NotFoundException();
+    if (
+      source.currency !== existing.currency &&
+      sourceId !== existing.sourceId
+    ) {
+      throw new BadRequestException(
+        "La fuente nueva debe usar la misma moneda del ingreso",
+      );
+    }
+    try {
+      const updated = await this.prisma.expectedIncome.update({
+        where: { id },
+        data: {
+          ...(parsed.data.sourceId !== undefined
+            ? { sourceId: parsed.data.sourceId }
+            : {}),
+          ...(parsed.data.expectedDate !== undefined
+            ? {
+                expectedDate: new Date(`${parsed.data.expectedDate}T00:00:00Z`),
+              }
+            : {}),
+          ...(parsed.data.expectedAmount !== undefined
+            ? { expectedAmount: new Prisma.Decimal(parsed.data.expectedAmount) }
+            : {}),
+          ...(parsed.data.actualAmount !== undefined
+            ? {
+                actualAmount: parsed.data.actualAmount
+                  ? new Prisma.Decimal(parsed.data.actualAmount)
+                  : null,
+              }
+            : {}),
+          ...(parsed.data.probability !== undefined
+            ? { probability: new Prisma.Decimal(parsed.data.probability) }
+            : {}),
+          ...(parsed.data.status !== undefined
+            ? {
+                status: parsed.data.status,
+                receivedAt:
+                  parsed.data.status === "received" ? new Date() : null,
+              }
+            : {}),
+          ...(parsed.data.reason !== undefined
+            ? { reason: parsed.data.reason }
+            : {}),
+          ...(parsed.data.notes !== undefined
+            ? { notes: parsed.data.notes ?? null }
+            : {}),
+        },
+        include: { source: true },
+      });
+      await this.recordAudit(
+        actor,
+        "ExpectedIncome",
+        id,
+        "updated",
+        existing,
+        updated,
+      );
+      return updated;
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new ConflictException(
+          "Ya existe un ingreso de esa fuente para la fecha seleccionada",
+        );
+      }
+      throw error;
+    }
+  }
+
+  async cancelExpectedIncome(id: string, actor: Actor) {
+    const existing = await this.expectedIncomeForActor(id, actor);
+    await this.ensureIncomeCanChange(id);
+    if (existing.status === "received") {
+      throw new ConflictException(
+        "Un ingreso recibido debe conciliarse; no puede cancelarse",
+      );
+    }
+    const updated = await this.prisma.expectedIncome.update({
+      where: { id },
+      data: { status: "cancelled" },
+      include: { source: true },
+    });
+    await this.recordAudit(
+      actor,
+      "ExpectedIncome",
+      id,
+      "cancelled",
+      existing,
+      updated,
+    );
+    return updated;
   }
 
   async createPlan(raw: unknown, actor: Actor) {
@@ -434,6 +639,50 @@ export class PlanningService {
     const plan = await this.prisma.financialPlan.findUnique({ where: { id } });
     if (!plan || !this.canRead(plan, actor)) throw new NotFoundException();
     return plan;
+  }
+
+  private async expectedIncomeForActor(id: string, actor: Actor) {
+    const income = await this.prisma.expectedIncome.findUnique({
+      where: { id },
+      include: { source: true },
+    });
+    if (!income || !this.canRead(income.source, actor)) {
+      throw new NotFoundException();
+    }
+    return income;
+  }
+
+  private async ensureIncomeCanChange(id: string) {
+    const applied = await this.prisma.planFundingAllocation.findFirst({
+      where: { expectedIncomeId: id, status: { not: "planned" } },
+      select: { id: true },
+    });
+    if (applied) {
+      throw new ConflictException(
+        "El ingreso ya tiene asignaciones aplicadas y no puede modificarse",
+      );
+    }
+  }
+
+  private recordAudit(
+    actor: Actor,
+    entityType: string,
+    entityId: string,
+    action: string,
+    before: unknown,
+    after: unknown,
+  ) {
+    return this.prisma.auditLog.create({
+      data: {
+        householdId: actor.householdId,
+        actorMemberId: actor.memberId,
+        entityType,
+        entityId,
+        action,
+        before: jsonSnapshot(before),
+        after: jsonSnapshot(after),
+      },
+    });
   }
 
   private canRead(

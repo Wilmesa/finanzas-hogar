@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .models import InsightBundle, InsightSnapshot
+from .models import ChatRequest, ChatResponse, InsightBundle, InsightSnapshot
 from .prompt import SYSTEM_PROMPT
 
 
@@ -13,6 +13,26 @@ class InsightProvider(ABC):
     @abstractmethod
     async def generate(self, snapshot: InsightSnapshot) -> InsightBundle:
         raise NotImplementedError
+
+    @abstractmethod
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        raise NotImplementedError
+
+
+CHAT_PROMPT = """Eres el asesor educativo de OKLE. Responde en español claro, breve y no culpabilizante.
+Usa solo el contexto financiero proporcionado; no inventes saldos ni transacciones. Distingue hechos de
+escenarios y explica supuestos. No des órdenes de compra o venta ni prometas rendimientos. Nunca infieras
+datos privados fuera del alcance indicado. Si faltan datos, dilo y formula una pregunta útil. La respuesta
+no sustituye asesoría financiera profesional."""
+
+
+def chat_messages(request: ChatRequest) -> list[dict]:
+    return [
+        {"role": "system", "content": CHAT_PROMPT},
+        {"role": "system", "content": f"Alcance: {request.scope}. Moneda: {request.currency}. Contexto verificado: {json.dumps(request.context, ensure_ascii=False)}"},
+        *[turn.model_dump() for turn in request.history[-12:]],
+        {"role": "user", "content": request.message},
+    ]
 
 
 class DeterministicProvider(InsightProvider):
@@ -33,6 +53,12 @@ class DeterministicProvider(InsightProvider):
                 "evidenceIds": [evidence_id],
             }],
             spendingFindings=[], opportunities=[], goals=[], news=[]
+        )
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        return ChatResponse(
+            content="El modo determinístico no conversa con un modelo externo. Puedo confirmar que el contexto financiero fue aislado correctamente; configura un proveedor IA para obtener una explicación personalizada.",
+            citations=[],
         )
 
 
@@ -78,6 +104,17 @@ class OpenAIProvider(InsightProvider):
             raise ValueError("OpenAI no devolvió texto estructurado")
         return InsightBundle.model_validate(json.loads(output_text))
 
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={"model": self.model, "messages": chat_messages(request), "temperature": 0.2},
+            )
+            response.raise_for_status()
+            result = response.json()
+        return ChatResponse(content=result["choices"][0]["message"]["content"], citations=[])
+
 
 class GeminiProvider(InsightProvider):
     def __init__(self) -> None:
@@ -107,6 +144,27 @@ class GeminiProvider(InsightProvider):
         except (KeyError, IndexError, TypeError) as error:
             raise ValueError("Gemini no devolvió texto estructurado") from error
         return InsightBundle.model_validate(json.loads(output_text))
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        messages = chat_messages(request)
+        contents = [
+            {"role": "model" if item["role"] == "assistant" else "user", "parts": [{"text": item["content"]}]}
+            for item in messages if item["role"] != "system"
+        ]
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                url,
+                headers={"x-goog-api-key": self.api_key},
+                json={
+                    "systemInstruction": {"parts": [{"text": CHAT_PROMPT}]},
+                    "contents": contents,
+                    "generationConfig": {"temperature": 0.2},
+                },
+            )
+            response.raise_for_status()
+            result = response.json()
+        return ChatResponse(content=result["candidates"][0]["content"]["parts"][0]["text"], citations=[])
 
 
 class OpenAICompatibleProvider(InsightProvider):
@@ -170,6 +228,22 @@ class OpenAICompatibleProvider(InsightProvider):
         except (KeyError, IndexError, TypeError) as error:
             raise ValueError(f"{self.provider_name} no devolvió texto estructurado") from error
         return InsightBundle.model_validate(json.loads(output_text))
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    **({"HTTP-Referer": os.environ["AI_COMPATIBLE_HTTP_REFERER"]} if os.getenv("AI_COMPATIBLE_HTTP_REFERER") else {}),
+                    **({"X-Title": os.environ["AI_COMPATIBLE_APP_NAME"]} if os.getenv("AI_COMPATIBLE_APP_NAME") else {}),
+                },
+                json={"model": self.model, "messages": chat_messages(request), "temperature": 0.2},
+            )
+            response.raise_for_status()
+            result = response.json()
+        return ChatResponse(content=result["choices"][0]["message"]["content"], citations=[])
 
 
 def provider_from_environment() -> InsightProvider:

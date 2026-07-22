@@ -68,9 +68,13 @@ DEPLOY_TARGET=private scripts/update-server.sh
 
 La actualización crea backup antes del pull, conserva target y `AUTH_MODE`, aplica migraciones y registra rollback en `runtime/deploy/last-update.env`. Los hashes locales están en PostgreSQL y sobreviven a reconstrucciones de imagen.
 
-### Migración FinNest 202607210002
+### Migración histórica 202607210002
 
-La migración `202607210002_finnest_profiles` es aditiva: incorpora avatar/color, fecha de onboarding y estado de sincronización. Hace nullable el identificador Firefly únicamente para poder guardar operaciones `pending` antes de la llamada externa y amplía el índice único para contextos privados por miembro. No borra hogares, miembros, cuentas, bolsillos, movimientos ni volúmenes.
+La migración `202607210002_finnest_profiles` conserva el nombre técnico histórico anterior a OKLE y es aditiva: incorpora avatar/color, fecha de onboarding y estado de sincronización. Hace nullable el identificador Firefly únicamente para poder guardar operaciones `pending` antes de la llamada externa y amplía el índice único para contextos privados por miembro. No borra hogares, miembros, cuentas, bolsillos, movimientos ni volúmenes.
+
+### Migración OKLE 202607220001
+
+La migración `202607220001_okle_crud_chat` añade categorías configurables, auditoría genérica y conversación trazable del asesor. Es aditiva y no modifica movimientos ni saldos existentes. Antes de actualizar, ejecute el backup documentado; después aplique `pnpm --filter @finanzas/api prisma:migrate:deploy` o el flujo de despliegue habitual.
 
 Antes de actualizar:
 

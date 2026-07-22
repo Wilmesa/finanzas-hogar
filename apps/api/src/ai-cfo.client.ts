@@ -69,4 +69,31 @@ export class AiCfoClient {
       );
     return response.json();
   }
+
+  async chat(request: unknown): Promise<{
+    content: string;
+    citations: Array<{ title: string; url: string }>;
+  }> {
+    const url = process.env.AI_CFO_URL;
+    const token = process.env.AI_CFO_INTERNAL_TOKEN;
+    if (!url || !token)
+      throw new ServiceUnavailableException("AI-CFO no está configurado");
+    const response = await fetch(`${url}/internal/v1/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-token": token,
+      },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok)
+      throw new ServiceUnavailableException(
+        `AI-CFO respondió ${response.status}`,
+      );
+    return response.json() as Promise<{
+      content: string;
+      citations: Array<{ title: string; url: string }>;
+    }>;
+  }
 }

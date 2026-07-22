@@ -63,6 +63,9 @@ model Household {
   reminderPreferences ReminderPreference[]
   pushSubscriptions PushSubscription[]
   reminderDeliveries ReminderDelivery[]
+  categories   Category[]
+  auditLogs    AuditLog[]
+  chatMessages ChatMessage[]
 }
 
 model LocalUser {
@@ -104,6 +107,8 @@ model Member {
   pushSubscriptions PushSubscription[]
   reminderDeliveries ReminderDelivery[]
   localUser LocalUser?
+  auditLogs AuditLog[]
+  chatMessages ChatMessage[]
 
   @@unique([householdId, email])
   @@index([householdId])
@@ -452,4 +457,53 @@ model PlanAuditEvent {
   actor         Member        @relation("PlanAuditActor", fields: [actorMemberId], references: [id])
 
   @@index([householdId, planId, createdAt])
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  householdId String
+  name        String
+  icon        String   @default("tag")
+  color       String   @default("#123C69")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, name])
+  @@index([householdId, active, name])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  householdId   String
+  actorMemberId String
+  entityType    String
+  entityId      String
+  action        String
+  before        Json?
+  after         Json?
+  createdAt     DateTime @default(now())
+  household     Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  actor         Member @relation(fields: [actorMemberId], references: [id], onDelete: Restrict)
+
+  @@index([householdId, entityType, entityId, createdAt])
+  @@index([actorMemberId, createdAt])
+}
+
+model ChatMessage {
+  id          String      @id @default(uuid())
+  householdId String
+  memberId    String
+  scope       LedgerScope @default(household)
+  role        String
+  content     String
+  citations   Json?
+  provider    String?
+  model       String?
+  createdAt   DateTime    @default(now())
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  member      Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, memberId, scope, createdAt])
 }

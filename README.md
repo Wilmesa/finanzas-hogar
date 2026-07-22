@@ -1,10 +1,10 @@
-# FinNest
+# OKLE
 
 Aplicación self-hosted de finanzas personales y de pareja. Firefly III conserva el libro contable; el Pocket Engine añade propósitos, metas, privacidad y proyecciones sin inventar movimientos bancarios.
 
 ## Estado de esta entrega
 
-El repositorio contiene una **beta experimental funcional y desplegable** de FinNest. `PUBLIC_DATA_MODE=local` permite una demostración sin infraestructura y `server` usa identidades, PostgreSQL y Firefly reales. La autenticación integrada admite `AUTH_MODE=local` (predeterminado privado) o `keycloak` (opcional/público):
+El repositorio contiene una **beta experimental funcional y desplegable** de OKLE. `PUBLIC_DATA_MODE=local` permite una demostración sin infraestructura y `server` usa identidades, PostgreSQL y Firefly reales. La autenticación integrada admite `AUTH_MODE=local` (predeterminado privado) o `keycloak` (opcional/público):
 
 - PWA responsive e instalable en SvelteKit con Hoy, Futuro, Patrimonio, Copiloto y Movimientos; Cuentas, Bolsillos, Hogar y Configuración son secciones secundarias.
 - Service worker con caché de interfaz y navegación visitada; API financiera y autenticación siempre quedan fuera de caché.
@@ -15,7 +15,7 @@ El repositorio contiene una **beta experimental funcional y desplegable** de Fin
 - Distribución priorizada de ingresos.
 - Proyecciones determinísticas de ahorro, CDT, inversión, deuda e inmuebles.
 - Plan financiero trazable: salarios, primas, alquileres u otras fuentes, calendario de ingresos y acuerdos versionados hacia bolsillos.
-- Adaptador Firefly por libro compartido o privado, administración de cuentas desde FinNest y estados independientes por libro.
+- Adaptador Firefly por libro compartido o privado, administración de cuentas desde OKLE y estados independientes por libro.
 - Servicio AI-CFO FastAPI con proveedores OpenAI, Gemini o determinístico de pruebas, salida estructurada y validación de evidencia.
 - Perfiles reales, pagadores del hogar, onboarding diagnosticable y temas claro/oscuro/sistema.
 - Noticias persistentes de BanRep y Alpha Vantage opcional, normalizadas y deduplicadas.

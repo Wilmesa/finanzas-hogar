@@ -3,31 +3,39 @@
   import { financeData } from "$lib/finance-store";
 
   const items = [
-    { href: "/", label: "Hoy", icon: "⌂" },
-    { href: "/planning", label: "Futuro", icon: "⌁" },
-    { href: "/patrimony", label: "Patrimonio", icon: "◇" },
-    { href: "/copilot", label: "Copiloto", icon: "✦" },
-    { href: "/transactions", label: "Movimientos", icon: "↕" },
+    { href: "/", label: "Inicio", icon: "home" },
+    { href: "/transactions", label: "Movimientos", icon: "movement" },
+    { href: "/pockets", label: "Bolsillos", icon: "wallet" },
+    { href: "/patrimony", label: "Patrimonio", icon: "trend" },
+    { href: "/more", label: "Más", icon: "more" },
   ];
 </script>
 
 <aside class="nav-shell" aria-label="Navegación principal">
-  <a class="brand" href="/" aria-label="FinNest, inicio">
-    <span class="brand-mark">F</span>
-    <span>FinNest</span>
+  <a class="brand" href="/" aria-label="OKLE, inicio">
+    <span class="brand-mark" aria-hidden="true"><span>O</span></span>
+    <span>OKLE</span>
   </a>
   <nav>
     {#each items as item}
-      <a href={item.href} class:active={page.url.pathname === item.href || (item.href === "/planning" && page.url.pathname === "/future")} aria-current={page.url.pathname === item.href ? "page" : undefined}>
-        <span class="nav-icon" aria-hidden="true">{item.icon}</span>
+      <a href={item.href} class:active={page.url.pathname === item.href} aria-current={page.url.pathname === item.href ? "page" : undefined}>
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          {#if item.icon === "home"}<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z" />
+          {:else if item.icon === "movement"}<path d="M7 3v18m0 0-3-3m3 3 3-3M17 21V3m0 0-3 3m3-3 3 3" />
+          {:else if item.icon === "wallet"}<path d="M4 5h14a2 2 0 0 1 2 2v12H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm0 0V3h13" /><path d="M16 11h4v4h-4a2 2 0 1 1 0-4Z" />
+          {:else if item.icon === "trend"}<path d="M3 17 9 11l4 4 8-9" /><path d="M15 6h6v6" />
+          {:else}<circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />{/if}
+        </svg>
         <span>{item.label}</span>
       </a>
     {/each}
   </nav>
   <div class="secondary-nav">
-    <a href="/pockets">Bolsillos</a>
-    <a href="/accounts">Cuentas</a>
-    <a href="/more">Configuración</a>
+    <span class="secondary-label">Planificación</span>
+    <a class:active={page.url.pathname === "/planning" || page.url.pathname === "/future"} href="/planning">Plan financiero</a>
+    <a class:active={page.url.pathname === "/copilot"} href="/copilot">Asesor IA</a>
+    <a class:active={page.url.pathname === "/accounts"} href="/accounts">Cuentas y tarjetas</a>
+    <a class:active={page.url.pathname === "/household"} href="/household">Hogar y perfiles</a>
   </div>
   <div class="member">
     <span class="avatar" style={`background:${$financeData.settings.memberColor}`}>
