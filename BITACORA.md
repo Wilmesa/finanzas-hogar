@@ -497,3 +497,25 @@ La actualización del servidor se realizará únicamente después de revisión m
 - Nueve pruebas operativas aprobadas; siete validaciones Compose se omitieron porque Docker no está instalado en esta estación.
 - QA móvil a 390 × 844: cambio claro/oscuro, menú Más, acceso a Pagos, formulario, enlace/referencia, editor de planes y recurrencia mensual verificados sin desbordamiento horizontal ni errores de consola.
 - El diálogo nativo de confirmación impidió completar por automatización visual el clic final de cancelar una proyección; la operación quedó cubierta por prueba unitaria de servicio y comprobación estática de la interfaz. No se oculta esta limitación.
+
+## 2026-07-22 — Navegación de pagos, bolsillos libres y correcciones móviles
+
+### Implementado
+
+- La cuarta posición de la navegación principal ahora abre Pagos; Patrimonio permanece disponible en Más y se eliminó el enlace duplicado de Pagos en la navegación secundaria de escritorio.
+- Los bolsillos ya no preguntan ni muestran un tipo. El nombre lo decide el usuario y se añadió un campo opcional de observaciones de hasta 1.000 caracteres. Internamente se conserva `purpose=custom` para no romper compatibilidad ni datos históricos.
+- Migración aditiva `202607220003_pocket_observations`: agrega `Pocket.notes` sin borrar ni transformar bolsillos existentes.
+- El cliente HTTP ya no envía `Content-Type: application/json` cuando una solicitud no tiene cuerpo. Esto corrige la desactivación de fuentes de ingreso y otras operaciones `DELETE` vacías.
+- El editor de destinos de un acuerdo usa tarjetas simétricas de dos columnas en escritorio y una columna en móvil, con resumen y acción de eliminación propios.
+- Se reforzaron `width`, `min-width` y el cambio a una sola columna de la pantalla Más para impedir que su contenido se comprima en una fracción del ancho móvil.
+
+### Pendiente de esta revisión
+
+- Aplicar la nueva migración únicamente durante el siguiente despliegue controlado, después del backup.
+
+### Verificación de esta revisión
+
+- Se añadió una prueba del cliente HTTP que reproduce exactamente el `DELETE` sin cuerpo y confirma que ya no incluye `Content-Type`; una segunda prueba conserva JSON para comandos que sí llevan cuerpo.
+- QA móvil en navegador a 390 × 844: Más, contenido principal y documento miden 390 px, sin desbordamiento horizontal. La navegación inferior muestra Inicio, Movimientos, Bolsillos, Pagos y Más.
+- Se creó correctamente un bolsillo local con nombre y observación libre, sin selector de tipo.
+- Se creó un ingreso esperado y después un acuerdo con dos destinos; el acuerdo se guardó y apareció en la memoria financiera con su primera versión.

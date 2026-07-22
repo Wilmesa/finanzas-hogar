@@ -72,6 +72,8 @@ La actualización crea backup antes del pull, conserva target y `AUTH_MODE`, apl
 
 La migración `202607210002_finnest_profiles` conserva el nombre técnico histórico anterior a OKLE y es aditiva: incorpora avatar/color, fecha de onboarding y estado de sincronización. Hace nullable el identificador Firefly únicamente para poder guardar operaciones `pending` antes de la llamada externa y amplía el índice único para contextos privados por miembro. No borra hogares, miembros, cuentas, bolsillos, movimientos ni volúmenes.
 
+La migración `202607220003_pocket_observations` añade únicamente el campo opcional `notes` a los bolsillos. El tipo técnico histórico se conserva internamente para compatibilidad, pero OKLE ya no obliga al usuario a clasificar un bolsillo como ahorro, gasto, deuda u otra categoría.
+
 ### Migración OKLE 202607220001
 
 La migración `202607220001_okle_crud_chat` añade categorías configurables, auditoría genérica y conversación trazable del asesor. Es aditiva y no modifica movimientos ni saldos existentes. Antes de actualizar, ejecute el backup documentado; después aplique `pnpm --filter @finanzas/api prisma:migrate:deploy` o el flujo de despliegue habitual.

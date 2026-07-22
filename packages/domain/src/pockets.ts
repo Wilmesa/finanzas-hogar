@@ -56,6 +56,7 @@ export const FundingPolicySchema = z.discriminatedUnion("kind", [
 export const CreatePocketSchema = z.object({
   name: z.string().trim().min(1).max(80),
   purpose: PocketPurposeSchema.default("custom"),
+  notes: z.string().trim().max(1000).optional(),
   visibility: PocketVisibilitySchema.default("household"),
   currency: z
     .string()

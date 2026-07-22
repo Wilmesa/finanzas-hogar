@@ -3,6 +3,7 @@ export interface PocketView {
   ownerMemberId?: string;
   name: string;
   purpose: string;
+  observations?: string;
   visibility: "household" | "private";
   currency: string;
   currentAmount: number;

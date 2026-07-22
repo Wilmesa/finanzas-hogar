@@ -8,12 +8,13 @@ export async function apiRequest<T>(
   const token = await getAccessToken();
   const csrfToken = getCsrfToken();
   const method = (init.method ?? "GET").toUpperCase();
+  const sendsJsonBody = typeof init.body === "string";
   const response = await fetch(`${env.PUBLIC_API_BASE_URL ?? "/api"}${path}`, {
     ...init,
     credentials: "same-origin",
     headers: {
       Accept: "application/json",
-      "Content-Type": "application/json",
+      ...(sendsJsonBody ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(authMode() === "local" &&
       !["GET", "HEAD", "OPTIONS"].includes(method) &&
@@ -37,5 +38,6 @@ export async function apiRequest<T>(
       payload?.message ?? payload?.error ?? `Error HTTP ${response.status}`,
     );
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }

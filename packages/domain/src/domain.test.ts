@@ -103,6 +103,22 @@ describe("Pocket Engine", () => {
     }
   });
 
+  it("crea un bolsillo sin clasificación y acepta observaciones libres", () => {
+    const parsed = CreatePocketSchema.parse({
+      name: "Proyecto familiar",
+      notes: "Usarlo cuando acordemos la fecha y el importe final.",
+      currency: "COP",
+      policy: {
+        kind: "target_by_contribution",
+        targetAmount: "5000000",
+        contributionAmount: "300000",
+        frequency: "monthly",
+      },
+    });
+    expect(parsed.purpose).toBe("custom");
+    expect(parsed.notes).toContain("fecha");
+  });
+
   it("distribuye ingreso por prioridad y remanente", () => {
     const result = previewIncomeAllocation("1000", "USD", [
       { pocketId: "mercado", priority: 1, mode: "fixed", value: "400" },

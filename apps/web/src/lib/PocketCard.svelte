@@ -13,7 +13,7 @@
   </header>
   <div>
     <h3>{pocket.name}</h3>
-    <p>{pocket.purpose}</p>
+    {#if pocket.observations}<p>{pocket.observations}</p>{/if}
   </div>
   <div class="amount-row">
     <strong>{currency(pocket.currentAmount, pocket.currency)}</strong>

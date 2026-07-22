@@ -287,6 +287,7 @@ function serverPocketToView(item: Record<string, unknown>): PocketView {
     ownerMemberId: String(item.ownerMemberId),
     name: String(item.name),
     purpose: String(item.purpose),
+    ...(item.notes ? { observations: String(item.notes) } : {}),
     visibility: item.visibility === "private" ? "private" : "household",
     currency: String(item.currency),
     currentAmount,
@@ -502,7 +503,7 @@ export async function hydrateFinanceData(): Promise<void> {
 
 export async function createPocket(input: {
   name: string;
-  purpose: string;
+  observations?: string;
   visibility: PocketView["visibility"];
   currency: string;
   targetAmount: number;
@@ -533,7 +534,12 @@ export async function createPocket(input: {
             };
     const created = await apiRequest<Record<string, unknown>>("/v1/pockets", {
       method: "POST",
-      body: JSON.stringify({ ...input, policy }),
+      body: JSON.stringify({
+        ...input,
+        purpose: "custom",
+        notes: input.observations?.trim() || undefined,
+        policy,
+      }),
     });
     financeData.update((state) => ({
       ...state,
@@ -544,7 +550,10 @@ export async function createPocket(input: {
   const pocket: PocketView = {
     id: crypto.randomUUID(),
     name: input.name,
-    purpose: input.purpose,
+    purpose: "custom",
+    ...(input.observations?.trim()
+      ? { observations: input.observations.trim() }
+      : {}),
     visibility: input.visibility,
     currency: input.currency,
     currentAmount: 0,
@@ -566,7 +575,7 @@ export async function updatePocket(
   pocket: PocketView,
   input: {
     name: string;
-    purpose: string;
+    observations?: string;
     visibility: PocketView["visibility"];
     targetAmount: number;
     policyKind: NonNullable<PocketView["policyKind"]>;
@@ -609,7 +618,8 @@ export async function updatePocket(
     method: "PATCH",
     body: JSON.stringify({
       name: input.name,
-      purpose: input.purpose,
+      purpose: "custom",
+      notes: input.observations?.trim() ?? "",
       visibility: input.visibility,
       policy,
       version: pocket.version ?? 1,
@@ -1762,7 +1772,20 @@ export async function importFinanceData(raw: string): Promise<void> {
     for (const pocket of parsed.pockets) {
       const createdId = await createPocket({
         name: pocket.name,
-        purpose: pocket.purpose,
+        ...(pocket.observations
+          ? { observations: pocket.observations }
+          : ![
+                "daily_spend",
+                "sinking_fund",
+                "purchase",
+                "emergency",
+                "debt",
+                "investment",
+                "real_estate",
+                "custom",
+              ].includes(pocket.purpose)
+            ? { observations: pocket.purpose }
+            : {}),
         visibility: pocket.visibility,
         currency: pocket.currency,
         targetAmount: pocket.targetAmount,

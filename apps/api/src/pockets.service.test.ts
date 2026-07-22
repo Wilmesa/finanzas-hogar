@@ -38,7 +38,8 @@ describe("PocketsService", () => {
     const result = await service.create(
       {
         name: "Mercado",
-        purpose: "daily_spend",
+        purpose: "custom",
+        notes: "Compras y transporte del hogar",
         visibility: "household",
         currency: "COP",
         policy: { kind: "periodic_spend", limit: "1000000", period: "monthly" },
@@ -46,6 +47,7 @@ describe("PocketsService", () => {
       actor,
     );
     expect(result.visibility).toBe("household");
+    expect(result.notes).toBe("Compras y transporte del hogar");
     expect(result.ownerMemberId).toBe(actor.memberId);
     expect(prisma.pocket.create).toHaveBeenCalledOnce();
   });
