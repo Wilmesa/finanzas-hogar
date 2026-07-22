@@ -14,7 +14,7 @@
 </script>
 
 <div class="auth-screen">
-  <span class="brand-mark large">N</span>
+  <span class="brand-mark large">O</span>
   {#if error}
     <h1>No pudimos iniciar sesión</h1>
     <p>{error}</p>

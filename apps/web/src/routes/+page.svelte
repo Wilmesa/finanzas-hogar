@@ -15,11 +15,17 @@
 
   const pockets = $derived($financeData.pockets);
   const transactions = $derived($financeData.transactions);
-  const available = $derived(
+  const reserved = $derived(
     pockets
-      .filter((pocket) => pocket.visibility === "household" && pocket.currency === $financeData.settings.baseCurrency)
+      .filter((pocket) => pocket.visibility === scope && pocket.currency === $financeData.settings.baseCurrency && pocket.status !== "archived")
       .reduce((sum, pocket) => sum + pocket.currentAmount, 0),
   );
+  const accountBalance = $derived(
+    $financeData.accounts
+      .filter((account) => account.scope === scope && account.currency === $financeData.settings.baseCurrency)
+      .reduce((sum, account) => sum + account.currentBalance, 0),
+  );
+  const available = $derived(accountBalance - reserved);
   const monthlySpent = $derived(
     transactions
       .filter((transaction) => transaction.kind === "expense" && transaction.currency === $financeData.settings.baseCurrency)
@@ -86,7 +92,7 @@
     <div>
       <span class="eyebrow">Disponible después de compromisos</span>
       <strong>{currency(available)}</strong>
-      <small>En {pockets.filter((pocket) => pocket.visibility === "household").length} bolsillos compartidos</small>
+      <small>Saldo real {currency(accountBalance)} menos {currency(reserved)} reservado</small>
     </div>
     <div class="hero-progress">
       <div><span>Presupuesto usado</span><b>{budgetUsed}%</b></div>
@@ -96,9 +102,9 @@
   </section>
 
   {#if latestBundle}
-    <section class="insight-card"><span class="spark">✦</span><div><span class="eyebrow">Copiloto · {latestInsight?.payload.provider} · {new Date(latestInsight?.createdAt ?? "").toLocaleDateString("es-CO")}</span><h2>{latestBundle.status === "ok" ? "Análisis financiero verificado" : "Datos insuficientes"}</h2><p>{latestBundle.summary}</p><a class="text-button" href="/copilot">Ver evidencia →</a></div></section>
+    <section class="insight-card"><span class="spark">✦</span><div><span class="eyebrow">Asesor · {latestInsight?.payload.provider} · {new Date(latestInsight?.createdAt ?? "").toLocaleDateString("es-CO")}</span><h2>{latestBundle.status === "ok" ? "Análisis financiero verificado" : "Datos insuficientes"}</h2><p>{latestBundle.summary}</p><a class="text-button" href="/copilot">Ver evidencia →</a></div></section>
   {:else}
-    <section class="insight-card neutral"><span class="spark">✦</span><div><span class="eyebrow">Copiloto</span><h2>Sin análisis generado</h2><p>Aún no hay suficientes movimientos para generar un análisis confiable.</p><a class="text-button" href="/copilot">Revisar AI-CFO →</a></div></section>
+    <section class="insight-card neutral"><span class="spark">✦</span><div><span class="eyebrow">Asesor</span><h2>Sin análisis generado</h2><p>Aún no hay suficientes movimientos para generar un análisis confiable.</p><a class="text-button" href="/copilot">Abrir asesor →</a></div></section>
   {/if}
 
   <section class="section-block">

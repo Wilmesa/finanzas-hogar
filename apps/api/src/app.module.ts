@@ -16,6 +16,8 @@ import {
   NewsController,
   PlanningController,
   PocketsController,
+  PaymentsController,
+  PatrimonyController,
   PushController,
   ProjectionsController,
   TransactionsController,
@@ -35,12 +37,16 @@ import { RedisService } from "./redis.service.js";
 import { SessionStore } from "./session-store.js";
 import { HouseholdService } from "./household.service.js";
 import { CategoriesService } from "./categories.service.js";
+import { PaymentsService } from "./payments.service.js";
+import { PatrimonyService } from "./patrimony.service.js";
 
 @Module({
   controllers: [
     HealthController,
     HouseholdController,
     PocketsController,
+    PaymentsController,
+    PatrimonyController,
     AccountsController,
     PlanningController,
     ProjectionsController,
@@ -72,6 +78,8 @@ import { CategoriesService } from "./categories.service.js";
     AuthenticationService,
     HouseholdService,
     CategoriesService,
+    PaymentsService,
+    PatrimonyService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

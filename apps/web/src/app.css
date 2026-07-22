@@ -185,6 +185,24 @@ button:disabled {
   font-weight: 900;
   font-size: 20px;
 }
+.brand-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: white;
+}
+.auth-logo {
+  width: 76px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+.auth-logo.large {
+  width: 112px;
+  height: 112px;
+}
 .nav-shell nav {
   display: grid;
   gap: 7px;
@@ -271,7 +289,7 @@ main {
   line-height: 1.55;
 }
 .eyebrow {
-  color: #6d786f;
+  color: var(--muted);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -362,7 +380,7 @@ main {
 }
 .insight-card p {
   margin: 0;
-  color: #506056;
+  color: var(--muted);
   font-size: 14px;
 }
 .text-button {
@@ -486,6 +504,12 @@ main {
 .pocket-card footer b {
   color: var(--ink);
 }
+.pocket-card.private-pocket {
+  border: 2px solid #d64550;
+}
+.pocket-card.partner-pocket {
+  border: 2px solid #f2c35b;
+}
 .pocket-with-action {
   position: relative;
 }
@@ -589,12 +613,12 @@ main {
   position: fixed;
   right: 28px;
   bottom: 28px;
-  z-index: 15;
+  z-index: 30;
   border: 0;
   border-radius: 99px;
   padding: 13px 19px;
   background: var(--lime);
-  color: var(--forest);
+  color: #123c69;
   font-weight: 850;
   box-shadow: 0 10px 30px rgba(15, 44, 35, 0.22);
 }
@@ -612,6 +636,12 @@ main {
   padding: 16px;
   background: rgba(9, 23, 18, 0.58);
   backdrop-filter: blur(3px);
+  overflow-y: auto;
+}
+.modal-backdrop > .quick-entry {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .quick-entry {
   width: min(480px, 100%);
@@ -672,6 +702,40 @@ textarea {
   background: var(--paper);
   color: var(--ink);
   outline: none;
+}
+input,
+select {
+  min-height: 46px;
+}
+.filter-bar.advanced > label {
+  margin: 0;
+  min-width: 145px;
+}
+.filter-bar.advanced > input,
+.filter-bar.advanced > select,
+.filter-bar.advanced > label input {
+  height: 46px;
+}
+.source-analysis {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) 1fr;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+.source-analysis h2 {
+  margin: 5px 0;
+}
+.source-bars {
+  display: grid;
+  gap: 8px;
+}
+.source-bars > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--blue);
 }
 input:focus,
 select:focus,
@@ -958,6 +1022,38 @@ textarea:focus {
   color: var(--lime);
   font-weight: 750;
   font-size: 13px;
+}
+.news-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: center;
+  margin-top: 24px;
+}
+.news-control h2 {
+  margin: 5px 0;
+}
+.news-control p {
+  margin: 0;
+  color: var(--muted);
+}
+.news-source-status {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.news-source-status span {
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: var(--mint);
+  color: var(--success);
+  font-size: 11px;
+  font-weight: 750;
+}
+.news-source-status span.failed {
+  background: var(--rose);
+  color: var(--danger);
 }
 .settings-list {
   display: grid;
@@ -1493,6 +1589,130 @@ textarea:focus {
 :root[data-theme="dark"] .transaction-row {
   border-color: var(--line);
 }
+:root[data-theme="dark"] .hero-balance {
+  background: #123c69;
+  color: #ffffff;
+}
+:root[data-theme="dark"] .hero-balance .eyebrow,
+:root[data-theme="dark"] .hero-balance small,
+:root[data-theme="dark"] .hero-progress p {
+  color: #dce8f5;
+}
+
+.nav-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--lime);
+  color: #123c69;
+  font-size: 11px;
+  font-weight: 900;
+}
+.payment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.payment-card {
+  border-top: 5px solid #4c8dff;
+}
+.payment-card.private {
+  border-top-color: #d64550;
+}
+.payment-card > header,
+.payment-total,
+.payment-due,
+.payment-links {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.payment-card h2 {
+  margin: 6px 0 3px;
+}
+.payment-card > header > strong {
+  font-size: 1.2rem;
+}
+.payment-total,
+.payment-due {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--blue);
+}
+.payment-due span {
+  display: grid;
+  gap: 3px;
+}
+.payment-due button {
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: var(--forest);
+  color: white;
+  font-weight: 750;
+}
+.payment-due.soon {
+  border-left: 5px solid var(--warning);
+}
+.payment-due.urgent,
+.payment-due.overdue {
+  border-left: 5px solid var(--danger);
+  background: var(--rose);
+}
+.payment-links {
+  margin-top: 14px;
+  font-size: 12px;
+}
+.payment-links a {
+  color: var(--forest-2);
+  font-weight: 800;
+}
+.payment-form {
+  width: min(720px, 100%);
+}
+.patrimony-form {
+  width: min(760px, 100%);
+}
+.net-worth-chart {
+  margin-top: 18px;
+}
+.net-worth-chart svg {
+  width: 100%;
+  height: 210px;
+  color: var(--forest-2);
+  overflow: visible;
+}
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+}
+.investment-card,
+.property-card {
+  display: grid;
+  gap: 8px;
+}
+.investment-card > strong,
+.property-card > strong {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+.investment-detail {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--sand);
+  font-size: 12px;
+}
 
 @media (max-width: 960px) {
   .app-shell {
@@ -1505,13 +1725,17 @@ textarea:focus {
     height: auto;
     padding: 8px max(10px, env(safe-area-inset-right))
       max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
-    background: rgba(22, 61, 49, 0.98);
+    background: rgba(18, 60, 105, 0.98);
     backdrop-filter: blur(14px);
   }
   .brand,
   .member,
   .secondary-nav {
     display: none;
+  }
+  .fab {
+    right: 18px;
+    bottom: calc(86px + env(safe-area-inset-bottom));
   }
   .nav-shell nav {
     display: grid;

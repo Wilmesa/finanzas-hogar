@@ -205,7 +205,23 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           },
           select: { id: true },
         });
-        if (checkedIn) continue;
+        const paymentDueLimit = new Date(localDate);
+        paymentDueLimit.setUTCDate(paymentDueLimit.getUTCDate() + 3);
+        const duePayments = await this.prisma.paymentOccurrence.count({
+          where: {
+            householdId: preference.householdId,
+            status: "planned",
+            dueDate: { lte: paymentDueLimit },
+            paymentPlan: {
+              status: "active",
+              OR: [
+                { visibility: "household" },
+                { ownerMemberId: preference.memberId },
+              ],
+            },
+          },
+        });
+        if (checkedIn && duePayments === 0) continue;
         try {
           await this.prisma.reminderDelivery.create({
             data: {
@@ -235,9 +251,13 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
               },
               JSON.stringify({
                 title: "OKLE",
-                body: "¿Ya registraste los movimientos de hoy?",
-                url: "/transactions?action=new",
+                body:
+                  duePayments > 0
+                    ? `${duePayments} pago${duePayments === 1 ? "" : "s"} requiere${duePayments === 1 ? "" : "n"} atención. Abre OKLE para revisar fechas y valores.`
+                    : "¿Ya registraste los movimientos de hoy?",
+                url: duePayments > 0 ? "/payments" : "/transactions?action=new",
                 tag: `daily-expenses-${local.date}-${local.time}`,
+                badgeCount: duePayments,
               }),
               { TTL: 3600, urgency: "normal" },
             );

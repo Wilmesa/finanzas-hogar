@@ -429,3 +429,34 @@ La actualización del servidor se realizará únicamente después de revisión m
 - La búsqueda web en vivo debe activarse por proveedor con políticas y fuentes aprobadas; el chat actual no inventa citas y solo muestra enlaces cuando el servicio devuelve referencias verificables.
 - Falta ejecutar validaciones Compose y builds Docker en CI o en una estación con Docker.
 - Ninguna migración se aplicó al servidor personal; se aplicará después de revisión, backup y merge siguiendo `docs/DEPLOY_PRIVATE_TAILSCALE.md`.
+
+## 2026-07-22 — Logo definitivo, Pagos, ejecución de planes y patrimonio
+
+### Implementado
+
+- Se integró el logo familiar suministrado como maestro `apps/web/static/icons/okle-master.png`; el generador Node lo convierte de forma reproducible a 192/512/maskable sin depender de utilidades del sistema.
+- El manifiesto cambió a `id=/okle` y `start_url=/?source=okle-pwa-v2`. El service worker conserva la limpieza de cachés FinNest/OKLE antiguas. Una instalación móvil anterior puede requerir desinstalar y reinstalar una vez porque Android/iOS conservan el nombre instalado.
+- Disponible real de portada = saldos de cuentas del alcance menos reservas activas en bolsillos de la misma moneda. Los ingresos futuros siguen excluidos hasta recibirse.
+- Planes: editar destinos y datos crea otra revisión; archivar conserva auditoría; un ingreso recibido permite ejecutar cada destino total o parcialmente con `Idempotency-Key`. Solo la parte ejecutada se vuelve reserva virtual.
+- Nuevo dominio Pagos: tipo, monto total/aproximado, frecuencia, fecha, enlace, referencia, privacidad, ocurrencias, urgencia visual y confirmación del valor real/origen. Los pagos próximos activan distintivo PWA y notificación genérica, sin revelar el nombre de pagos privados.
+- Patrimonio: posiciones CDT/CAT, acciones, fondos o dólares en app; tasa, vencimiento, bruto, costos, neto, ticker, unidades, precio/fecha/fuente. También inmuebles con sector, valoración, supuesto de apreciación y una serie histórica de cortes netos.
+- Asesor: Enter envía, Shift+Enter crea línea, se puede limpiar la conversación propia y el contexto agrega gastos por categorías y miembros anónimos. Nunca incluye nombres, números de cuenta, notas libres ni datos privados de la pareja.
+- Noticias: feed oficial BanRep en español, DANE, Alpha Vantage opcional y RSS HTTPS regionales configurables. La pantalla muestra estado por fuente y errores en vez de fingir contenido.
+- Contraste oscuro corregido en portada, tarjeta del Asesor, instalación PWA y botón flotante; este último queda por encima de la navegación móvil. Formularios y filtros usan altura coherente.
+
+### Funciona y fue comprobado
+
+- `CI=true pnpm install --frozen-lockfile`: correcto.
+- `pnpm db:generate`: Prisma Client generado con `PaymentPlan`, `PaymentOccurrence`, `InvestmentPosition`, `PropertyAsset`, `NetWorthSnapshot`, `Prisma.Decimal`, tipos JSON y errores oficiales.
+- `pnpm verify`: correcto; TypeScript/Svelte 0 errores y 0 advertencias, 21 pruebas de dominio, 27 pruebas API (incluidas validación/privacidad de Pagos), 9 pruebas operativas aprobadas, builds web/API y formato.
+- `python3 -m pytest services/ai-cfo/tests -q`: 7 aprobadas.
+- QA móvil real a 390 × 844: navegación, botón Registrar y tarjeta de disponible visibles; se corrigieron el contraste detectado y la incoherencia del saldo demo.
+- La búsqueda de secretos no encontró claves, `.env`, tokens ni datos personales nuevos.
+
+### No probado o pendiente
+
+- Docker no está instalado en esta estación: 7 pruebas Compose permanecen `SKIP`; los builds Docker y healthchecks deben ejecutarse en GitHub Actions/servidor antes de datos reales.
+- No se aplicó la nueva migración a ninguna base ni se desplegó al servidor.
+- Marcar un pago guarda trazabilidad de planificación; el gasto bancario debe registrarse/conciliarse aparte con Firefly. Automatizar ese enlace será la siguiente extensión del adaptador.
+- Las cotizaciones se ingresan con fuente y fecha. No hay órdenes automáticas ni recomendación de compra/venta; el Asesor se mantiene educativo.
+- La entrega Web Push debe verificarse en las PWA reales de ambos móviles.

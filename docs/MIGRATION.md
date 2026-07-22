@@ -84,6 +84,20 @@ git status --porcelain
 DEPLOY_TARGET=private scripts/update-server.sh
 ```
 
+### Migración funcional 202607220002
+
+`202607220002_payments_investments_assets` es aditiva y crea pagos/vencimientos, posiciones de inversión, inmuebles y cortes históricos de patrimonio. También amplía los destinos de un plan para aceptar exactamente un bolsillo o un pago y registra la cantidad ejecutada de forma parcial. No elimina migraciones ni movimientos Firefly.
+
+Después de desplegarla, valide en este orden:
+
+1. Crear y editar un pago compartido; comprobar que aparece su vencimiento.
+2. Marcar un pago como realizado indicando valor real y bolsillo, sin confundirlo con el movimiento Firefly aún no conciliado.
+3. Marcar un ingreso esperado como recibido y ejecutar una asignación parcial; comprobar que solo lo ejecutado aumenta la reserva virtual.
+4. Registrar un CDT y un inmueble con fuente/fecha de valoración y guardar un corte patrimonial.
+5. Abrir Asesor OKLE y confirmar que el contexto declara anonimización y no contiene nombres ni cuentas.
+
+Si la PWA instalada conserva el nombre FinNest, elimine una sola vez el acceso antiguo y reinstale OKLE. El nuevo manifiesto usa `id=/okle`, iconos derivados de `okle-master.png` y limpia cachés históricas; los sistemas móviles no renombran siempre una instalación ya existente.
+
 Después valide login de ambos miembros, nombres reales, libros Firefly, cuenta compartida, bolsillo periódico, gasto, Copiloto y Web Push. No ejecute `docker compose down -v`, no cambie `COMPOSE_PROJECT_NAME` y no renombre volúmenes.
 
 ### Rollback

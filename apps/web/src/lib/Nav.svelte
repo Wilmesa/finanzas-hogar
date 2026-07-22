@@ -1,6 +1,19 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { financeData } from "$lib/finance-store";
+  import { apiRequest } from "$lib/api";
+  import { isServerMode } from "$lib/auth";
+  import { onMount } from "svelte";
+
+  let duePayments = $state(0);
+  onMount(async () => {
+    if (!isServerMode()) return;
+    try {
+      duePayments = (await apiRequest<{ count: number }>("/v1/payments/due-count")).count;
+      const badgeNavigator = navigator as Navigator & { setAppBadge?: (count?: number) => Promise<void> };
+      if (badgeNavigator.setAppBadge) await badgeNavigator.setAppBadge(duePayments);
+    } catch { /* El distintivo no debe bloquear la navegación. */ }
+  });
 
   const items = [
     { href: "/", label: "Inicio", icon: "home" },
@@ -13,7 +26,7 @@
 
 <aside class="nav-shell" aria-label="Navegación principal">
   <a class="brand" href="/" aria-label="OKLE, inicio">
-    <span class="brand-mark" aria-hidden="true"><span>O</span></span>
+    <img class="brand-logo" src="/icons/okle-master.png" alt="" aria-hidden="true" />
     <span>OKLE</span>
   </a>
   <nav>
@@ -33,6 +46,7 @@
   <div class="secondary-nav">
     <span class="secondary-label">Planificación</span>
     <a class:active={page.url.pathname === "/planning" || page.url.pathname === "/future"} href="/planning">Plan financiero</a>
+    <a class:active={page.url.pathname === "/payments"} href="/payments">Pagos {#if duePayments}<span class="nav-badge">{duePayments}</span>{/if}</a>
     <a class:active={page.url.pathname === "/copilot"} href="/copilot">Asesor IA</a>
     <a class:active={page.url.pathname === "/accounts"} href="/accounts">Cuentas y tarjetas</a>
     <a class:active={page.url.pathname === "/household"} href="/household">Hogar y perfiles</a>

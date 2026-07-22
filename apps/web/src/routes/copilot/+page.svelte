@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    clearChat,
     financeData,
     generateInsight,
     loadChat,
@@ -53,6 +54,20 @@
     finally { sending = false; }
   }
 
+  function sendOnEnter(event: KeyboardEvent) {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    (event.currentTarget as HTMLTextAreaElement | null)
+      ?.closest("form")
+      ?.requestSubmit();
+  }
+
+  async function clearConversation() {
+    if (!confirm("¿Limpiar tu conversación en este alcance? Esta acción no borra movimientos ni análisis.")) return;
+    await clearChat(scope);
+    messages = [];
+  }
+
   async function generate() {
     generating = true; error = "";
     try { await generateInsight(scope); }
@@ -87,6 +102,7 @@
 
   {#if mode === "chat"}
     <section class="chat-panel panel">
+      <div class="section-heading"><div><span class="eyebrow">Contexto anónimo</span><small>Patrones agregados, sin nombres ni números de cuenta.</small></div><button class="danger-text" onclick={clearConversation}>Limpiar conversación</button></div>
       <div class="chat-messages" aria-live="polite">
         {#if messages.length === 0}<div class="empty-state"><strong>¿Qué quieres entender o planear?</strong><p>Pregunta, por ejemplo, si tu ritmo de ahorro alcanza para una meta o qué categorías crecieron este mes.</p></div>{/if}
         {#each messages as message}
@@ -100,7 +116,7 @@
       </div>
       <form class="chat-composer" onsubmit={send}>
         <label class="sr-only" for="advisor-question">Pregunta para el asesor</label>
-        <textarea id="advisor-question" bind:value={draft} maxlength="4000" rows="2" placeholder="Pregunta sobre gastos, metas, deudas o escenarios…"></textarea>
+        <textarea id="advisor-question" bind:value={draft} onkeydown={sendOnEnter} maxlength="4000" rows="2" placeholder="Pregunta sobre gastos, metas, deudas o escenarios… (Enter para enviar)"></textarea>
         <button class="primary-button" disabled={sending || !$financeData.aiStatus.generationEnabled}>Enviar</button>
       </form>
       <p class="advisor-disclaimer">Contenido educativo basado en los datos autorizados. No constituye asesoría financiera, tributaria ni de inversión profesional.</p>

@@ -43,6 +43,15 @@
     }
     return new Set([...counts.entries()].filter(([, count]) => count >= 2).map(([key]) => key));
   });
+  const spendByPocket = $derived.by(() => {
+    const totals = new Map<string, number>();
+    for (const transaction of transactions) {
+      if (transaction.kind !== "expense") continue;
+      const label = transaction.pocketId ? transaction.pocket : "Sin bolsillo";
+      totals.set(label, (totals.get(label) ?? 0) + transaction.amount);
+    }
+    return [...totals.entries()].sort((left, right) => right[1] - left[1]);
+  });
 
   onMount(() => {
     registering = page.url.searchParams.get("action") === "new";
@@ -109,6 +118,7 @@
       {#if error}<p class="form-error">{error}</p>{/if}<button class="primary-button" onclick={save}>Guardar movimiento</button>
     </section>
   {/if}
+  <section class="source-analysis panel"><div><span class="eyebrow">Origen del gasto</span><h2>¿De qué bolsillo salió?</h2><p>La atribución permite detectar gastos cargados al propósito equivocado.</p></div><div class="source-bars">{#each spendByPocket.slice(0,4) as [pocket, total]}<div><span>{pocket}</span><b>{currency(total)}</b></div>{/each}{#if spendByPocket.length === 0}<small>Registra gastos para comparar sus fuentes.</small>{/if}</div></section>
   <section class="panel transaction-panel">
     <div class="filter-bar advanced"><input aria-label="Buscar movimientos" placeholder="Buscar comercio o categoría" bind:value={search} /><select aria-label="Filtrar bolsillo" bind:value={pocketFilter}><option value="all">Todos los bolsillos</option>{#each pockets as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</select><select aria-label="Filtrar persona" bind:value={payerFilter}><option value="all">Todas las personas</option>{#each $financeData.members as member}<option value={member.displayName}>{member.displayName}</option>{/each}</select><select aria-label="Filtrar categoría" bind:value={categoryFilter}><option value="all">Todas las categorías</option>{#each $financeData.categories as item}<option value={item.name}>{item.name}</option>{/each}</select><label>Desde<input type="date" bind:value={dateFrom} /></label><label>Hasta<input type="date" bind:value={dateTo} /></label></div>
     <div class="transaction-list detailed">

@@ -77,6 +77,9 @@
   {#if !canInstall && !installed}
     <small>En iPhone o iPad: Compartir → Añadir a pantalla de inicio. En otros navegadores, usa la opción Instalar del menú.</small>
   {/if}
+  {#if installed}
+    <small>Si aún ves “FinNest”, elimina una vez el acceso anterior y vuelve a instalar OKLE: Android e iOS conservan el nombre de instalaciones antiguas aunque el servidor ya esté actualizado.</small>
+  {/if}
   {#if message}<p class="success-message" role="status">{message}</p>{/if}
 </section>
 
@@ -96,4 +99,8 @@
   .connection-status::before { content: ""; width: .55rem; height: .55rem; border-radius: 50%; background: #2b7c57; }
   .connection-status.offline::before { background: #b45a34; }
   .offline-status { font-size: .86rem; font-weight: 700; color: #275c48; }
+  :global(:root[data-theme="dark"]) .pwa-card { background: #1d3550; border-color: rgba(255,255,255,.14); }
+  :global(:root[data-theme="dark"]) .pwa-card p,
+  :global(:root[data-theme="dark"]) .pwa-card small { color: #dce8f5; }
+  :global(:root[data-theme="dark"]) .offline-status { color: #f2c35b; }
 </style>

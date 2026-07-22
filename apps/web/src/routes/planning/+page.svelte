@@ -1,7 +1,11 @@
 <script lang="ts">
   import { currency } from "$lib/demo";
+  import { apiRequest } from "$lib/api";
+  import { isServerMode } from "$lib/auth";
+  import { onMount } from "svelte";
   import {
     archiveIncomeSource,
+    archiveFundingPlan,
     cancelExpectedIncome,
     createExpectedIncome,
     createFundingPlan,
@@ -9,6 +13,8 @@
     financeData,
     loadPlanHistory,
     recordPlanReview,
+    executePlanAllocation,
+    updateFundingPlan,
     updateExpectedIncome,
     updateIncomeSource,
   } from "$lib/finance-store";
@@ -30,6 +36,17 @@
   let reviewNote = $state("");
   let editingSourceId = $state<string | null>(null);
   let editingIncomeId = $state<string | null>(null);
+  let editingPlanId = $state<string | null>(null);
+  let paymentDestinations = $state<Array<{ id: string; name: string; visibility: "household" | "private"; currency: string }>>([]);
+
+  onMount(async () => {
+    if (isServerMode()) {
+      try { paymentDestinations = await apiRequest<typeof paymentDestinations>("/v1/payments"); }
+      catch { paymentDestinations = []; }
+    } else {
+      paymentDestinations = (JSON.parse(localStorage.getItem("okle:payments") ?? "[]") as typeof paymentDestinations);
+    }
+  });
 
   let sourceName = $state("");
   let sourceKind = $state("salary");
@@ -77,9 +94,17 @@
         ),
     ),
   );
+  const eligibleIncomes = $derived(
+    editingPlanId
+      ? $financeData.expectedIncomes.filter((income) =>
+          unplannedIncomes.some((item) => item.id === income.id) ||
+          $financeData.fundingPlans.find((plan) => plan.id === editingPlanId)?.allocations.some((allocation) => allocation.expectedIncomeId === income.id),
+        )
+      : unplannedIncomes,
+  );
   const selectedIncome = $derived(
-    unplannedIncomes.find((item) => item.id === planIncomeId) ??
-      unplannedIncomes[0],
+    eligibleIncomes.find((item) => item.id === planIncomeId) ??
+      eligibleIncomes[0],
   );
   const selectedIncomeSource = $derived(
     $financeData.incomeSources.find((item) => item.id === incomeSourceId),
@@ -91,6 +116,9 @@
         pocket.visibility === planVisibility &&
         (!selectedIncome || pocket.currency === selectedIncome.currency),
     ),
+  );
+  const compatiblePayments = $derived(
+    paymentDestinations.filter((payment) => payment.visibility === planVisibility && (!selectedIncome || payment.currency === selectedIncome.currency)),
   );
   const preview = $derived.by(() => {
     const total = selectedIncome?.expectedAmount ?? 0;
@@ -125,10 +153,10 @@
 
   $effect(() => {
     if (
-      unplannedIncomes.length > 0 &&
-      !unplannedIncomes.some((income) => income.id === planIncomeId)
+      eligibleIncomes.length > 0 &&
+      !eligibleIncomes.some((income) => income.id === planIncomeId)
     ) {
-      planIncomeId = unplannedIncomes[0]?.id ?? "";
+      planIncomeId = eligibleIncomes[0]?.id ?? "";
     }
   });
 
@@ -136,6 +164,7 @@
     creator = value;
     editingSourceId = null;
     editingIncomeId = null;
+    editingPlanId = null;
     error = "";
     success = "";
   }
@@ -271,11 +300,11 @@
     saving = true;
     error = "";
     try {
-      await createFundingPlan({
+      const planInput = {
         title: planTitle.trim(),
         purpose: planPurpose.trim(),
         horizon: planHorizon,
-        visibility: planVisibility,
+        visibility: planVisibility as "household" | "private",
         currency: income.currency,
         status: planStatus,
         startDate: new Date().toISOString().slice(0, 10),
@@ -283,7 +312,9 @@
         decisionNote: decisionNote.trim(),
         allocations: allocationDrafts.map((allocation, index) => ({
           expectedIncomeId: income.id,
-          pocketId: allocation.pocketId,
+          ...(allocation.pocketId.startsWith("payment:")
+            ? { paymentPlanId: allocation.pocketId.slice(8) }
+            : { pocketId: allocation.pocketId }),
           mode: allocation.mode,
           ...(allocation.mode === "fixed"
             ? { value: allocation.value ?? 0 }
@@ -293,12 +324,17 @@
           priority: index + 1,
           rationale: allocation.rationale.trim(),
         })),
-      });
+      };
+      if (editingPlanId) await updateFundingPlan(editingPlanId, planInput);
+      else await createFundingPlan(planInput);
       creator = null;
       planTitle = "";
       planPurpose = "";
       decisionNote = "";
-      success = "Plan guardado con su primera revisión inmutable.";
+      success = editingPlanId
+        ? "Plan actualizado; la versión anterior permanece en la historia."
+        : "Plan guardado con su primera revisión inmutable.";
+      editingPlanId = null;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "No fue posible guardar el plan";
     } finally {
@@ -306,9 +342,47 @@
     }
   }
 
+  function editPlan(plan: FundingPlanView) {
+    editingPlanId = plan.id;
+    creator = "plan";
+    planTitle = plan.title;
+    planPurpose = plan.purpose;
+    planHorizon = plan.horizon;
+    planPrivate = plan.visibility === "private";
+    planStatus = plan.status === "draft" || plan.status === "agreed" ? plan.status : "active";
+    planTargetDate = plan.targetDate ?? "";
+    planIncomeId = plan.allocations[0]?.expectedIncomeId ?? "";
+    decisionNote = "Actualización del acuerdo: ";
+    allocationDrafts = plan.allocations.filter((item) => item.pocketId).map((item) => ({
+      pocketId: item.paymentPlanId ? `payment:${item.paymentPlanId}` : item.pocketId ?? "",
+      mode: item.mode,
+      value: item.mode === "percentage" ? (item.value ?? 0) * 100 : item.value,
+      rationale: item.rationale,
+    }));
+    if (!allocationDrafts.length) addAllocation();
+  }
+
+  async function removePlan(plan: FundingPlanView) {
+    if (!confirm(`¿Archivar “${plan.title}”? Su historial y auditoría se conservarán.`)) return;
+    await archiveFundingPlan(plan.id);
+    success = "Plan archivado sin borrar su trazabilidad.";
+  }
+
+  async function executeAllocation(allocation: FundingPlanView["allocations"][number]) {
+    if (!allocation.id) return;
+    const raw = prompt(`¿Cuánto deseas ejecutar hacia ${allocation.pocketName}?`, String(allocation.value ?? 0));
+    if (!raw) return;
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || amount <= 0) return (error = "La cantidad a ejecutar no es válida.");
+    await executePlanAllocation(allocation.id, amount);
+    success = "Asignación ejecutada. El saldo pendiente continúa visible.";
+  }
+
   function addAllocation() {
     allocationDrafts.push({
-      pocketId: compatiblePockets[0]?.id ?? "",
+      pocketId:
+        compatiblePockets[0]?.id ??
+        (compatiblePayments[0] ? `payment:${compatiblePayments[0].id}` : ""),
       mode: "fixed",
       value: undefined,
       rationale: "",
@@ -400,7 +474,7 @@
         <button class="primary-button" disabled={saving} onclick={saveIncome}>{editingIncomeId ? "Guardar corrección" : "Guardar ingreso esperado"}</button>
       {:else}
         <div class="form-grid planning-form">
-          <label>Ingreso a distribuir<select bind:value={planIncomeId}>{#each unplannedIncomes as income}<option value={income.id}>{income.sourceName} · {currency(income.expectedAmount, income.currency)} · {income.expectedDate}</option>{/each}</select>{#if unplannedIncomes.length === 0}<small>Todos los ingresos ya tienen acuerdo. Crea otro ingreso o revisa el plan existente.</small>{/if}</label>
+          <label>Ingreso a distribuir<select bind:value={planIncomeId}>{#each eligibleIncomes as income}<option value={income.id}>{income.sourceName} · {currency(income.expectedAmount, income.currency)} · {income.expectedDate}</option>{/each}</select>{#if eligibleIncomes.length === 0}<small>Todos los ingresos ya tienen acuerdo. Crea otro ingreso o revisa el plan existente.</small>{/if}</label>
           <label>Horizonte<select bind:value={planHorizon}><option value="daily">Día a día</option><option value="weekly">Semana</option><option value="monthly">Mes</option><option value="short_term">Corto plazo</option><option value="long_term">Largo plazo</option></select></label>
           <label>Nombre del acuerdo<input bind:value={planTitle} placeholder="Ej. Prima diciembre 2026" /></label>
           <label>Estado<select bind:value={planStatus}><option value="draft">Borrador</option><option value="agreed">Acordado</option><option value="active">Activo</option></select></label>
@@ -413,7 +487,7 @@
           <div class="section-heading"><div><span class="eyebrow">Asignaciones</span><h2>¿A dónde irá?</h2></div><button class="text-button" onclick={addAllocation}>＋ Otro destino</button></div>
           {#each allocationDrafts as allocation, index}
             <div class="allocation-line">
-              <label>Bolsillo<select bind:value={allocation.pocketId}>{#each compatiblePockets as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</select></label>
+              <label>Destino<select bind:value={allocation.pocketId}><optgroup label="Bolsillos">{#each compatiblePockets as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</optgroup>{#if compatiblePayments.length}<optgroup label="Pagos programados">{#each compatiblePayments as payment}<option value={`payment:${payment.id}`}>{payment.name}</option>{/each}</optgroup>{/if}</select></label>
               <label>Regla<select bind:value={allocation.mode}><option value="fixed">Cantidad fija</option><option value="percentage">Porcentaje</option><option value="remainder">Remanente</option></select></label>
               {#if allocation.mode !== "remainder"}<label>{allocation.mode === "percentage" ? "Porcentaje (%)" : "Cantidad"}<input type="number" min="0" bind:value={allocation.value} /></label>{/if}
               <label class="allocation-reason">¿Por qué?<input bind:value={allocation.rationale} placeholder="Motivo acordado" /></label>
@@ -424,7 +498,7 @@
           <div class:danger={preview.overallocated > 0} class="plan-balance"><span>Asignado <b>{currency(preview.allocated, selectedIncome?.currency ?? "COP")}</b></span><span>Sin decidir <b>{currency(preview.unassigned, selectedIncome?.currency ?? "COP")}</b></span>{#if preview.overallocated > 0}<span>Exceso <b>{currency(preview.overallocated, selectedIncome?.currency ?? "COP")}</b></span>{/if}</div>
         </div>
         <label>Memoria de la decisión<textarea bind:value={decisionNote} placeholder="Ej. El 20 de julio acordamos priorizar la cuota inicial porque…"></textarea></label>
-        <button class="primary-button" disabled={saving || compatiblePockets.length === 0} onclick={savePlan}>Guardar acuerdo y versión 1</button>
+        <button class="primary-button" disabled={saving || compatiblePockets.length + compatiblePayments.length === 0} onclick={savePlan}>{editingPlanId ? "Guardar nueva versión" : "Guardar acuerdo y versión 1"}</button>
       {/if}
     </section>
   {/if}
@@ -463,9 +537,9 @@
           <header><div><span class="privacy">{plan.visibility === "private" ? "Solo yo" : "Compartido"}</span><span class={`status ${plan.status}`}>{plan.status}</span></div><small>Versión {plan.version} · {plan.updatedAt ? new Date(plan.updatedAt).toLocaleString("es-CO") : "Guardado"}</small></header>
           <h3>{plan.title}</h3><p>{plan.purpose}</p>
           <div class="plan-destinations">
-            {#each plan.allocations as allocation}<div><span>{allocation.sourceName} → <b>{allocation.pocketName}</b></span><strong>{allocation.mode === "fixed" ? currency(allocation.value ?? 0, plan.currency) : allocation.mode === "percentage" ? `${Math.round((allocation.value ?? 0) * 100)} %` : "Remanente"}</strong><small>{allocation.rationale}</small></div>{/each}
+            {#each plan.allocations as allocation}<div><span>{allocation.sourceName} → <b>{allocation.pocketName}</b></span><strong>{allocation.mode === "fixed" ? currency(allocation.value ?? 0, plan.currency) : allocation.mode === "percentage" ? `${Math.round((allocation.value ?? 0) * 100)} %` : "Remanente"}</strong><small>{allocation.rationale}</small><small>Ejecutado: {currency(allocation.executedAmount ?? 0, plan.currency)} · {allocation.status ?? "planeado"}</small>{#if $financeData.expectedIncomes.find((income) => income.id === allocation.expectedIncomeId)?.status === "received" && allocation.status !== "applied"}<button class="text-button" onclick={() => executeAllocation(allocation)}>Ejecutar total o parcial</button>{/if}</div>{/each}
           </div>
-          <button class="primary-button subtle" onclick={() => toggleHistory(plan)}>{expandedPlanId === plan.id ? "Ocultar historia" : "Revisar acuerdo"}</button>
+          <div class="row-actions"><button onclick={() => editPlan(plan)}>Editar destinos</button><button class="primary-button subtle" onclick={() => toggleHistory(plan)}>{expandedPlanId === plan.id ? "Ocultar historia" : "Revisar acuerdo"}</button><button class="danger-text" onclick={() => removePlan(plan)}>Archivar</button></div>
           {#if expandedPlanId === plan.id}
             <div class="decision-history">
               {#each plan.revisions as revision}<div><span>v{revision.version}</span><p>{revision.decisionNote}</p><small>{revision.actorName ?? "Miembro"} · {new Date(revision.createdAt).toLocaleString("es-CO")}</small></div>{/each}
