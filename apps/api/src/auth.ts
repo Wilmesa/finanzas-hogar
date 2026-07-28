@@ -128,6 +128,10 @@ export class AuthGuard implements CanActivate {
     if (
       path === "/health" ||
       path === "/v1/auth/login" ||
+      path === "/v1/auth/setup-status" ||
+      path === "/v1/auth/setup" ||
+      path === "/v1/auth/join" ||
+      path.startsWith("/v1/auth/invitations/") ||
       path.startsWith("/v1/automation/")
     ) {
       return true;

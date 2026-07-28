@@ -2,6 +2,7 @@ import { browser } from "$app/environment";
 import { get, writable } from "svelte/store";
 import { apiRequest } from "./api";
 import { isServerMode } from "./auth";
+import { queueOfflineTransaction } from "./offline-queue";
 import {
   pockets as demoPockets,
   transactions as demoTransactions,
@@ -276,6 +277,11 @@ if (browser) {
     if (!isServerMode())
       localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
   });
+  navigator.serviceWorker?.addEventListener("message", (event) => {
+    if (event.data?.type === "OKLE_SYNC_COMPLETE") {
+      void hydrateFinanceData();
+    }
+  });
 }
 
 function serverPocketToView(item: Record<string, unknown>): PocketView {
@@ -494,9 +500,31 @@ export async function hydrateFinanceData(): Promise<void> {
       ),
       amount: Number(item.amount),
       currency: String(item.currency),
-      kind: "expense",
+      scope: item.ledgerScope === "private" ? "private" : "household",
+      kind:
+        item.transactionType === "deposit"
+          ? "income"
+          : item.transactionType === "transfer"
+            ? "allocation"
+            : "expense",
       date: new Date(String(item.occurredAt)).toLocaleDateString("es-CO"),
       occurredAt: String(item.occurredAt),
+      ...(item.syncStatus === "synchronized"
+        ? { syncStatus: "synchronized" as const }
+        : item.syncStatus === "failed"
+          ? { syncStatus: "failed" as const }
+          : {}),
+      reviewStatus:
+        item.reviewStatus === "PENDING" ||
+        item.reviewStatus === "FLAGGED_FOR_PARTNER"
+          ? item.reviewStatus
+          : "REVIEWED",
+      origin:
+        item.origin === "FIREFLY_WEBHOOK" ||
+        item.origin === "OPEN_FINANCE" ||
+        item.origin === "OFFLINE_SYNC"
+          ? item.origin
+          : "MANUAL",
     })),
   }));
 }
@@ -678,28 +706,62 @@ export async function createTransaction(input: {
   if (isServerMode()) {
     const accountScope = pocket.visibility;
     const account = state.accounts.find(
-      (item) => item.id === input.accountId && item.scope === accountScope,
+      (item) =>
+        item.id === input.accountId &&
+        (item.scope === accountScope ||
+          (pocket.visibility === "private" && item.scope === "household")),
     );
     if (!account) {
       throw new Error("Selecciona una cuenta compatible con el bolsillo");
     }
-    await apiRequest("/v1/transactions", {
-      method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({
-        type: kind === "income" ? "deposit" : "withdrawal",
-        amount: String(input.amount),
-        currency: pocket.currency,
-        description: input.merchant,
+    const idempotencyKey = crypto.randomUUID();
+    const body = {
+      type: kind === "income" ? "deposit" : "withdrawal",
+      amount: String(input.amount),
+      currency: pocket.currency,
+      description: input.merchant,
+      category: input.category,
+      pocketId: pocket.id,
+      occurredAt: new Date().toISOString(),
+      fundingSourceScope: account.scope,
+      payerMemberId: input.payerMemberId,
+      sourceId: kind === "expense" ? account.id : undefined,
+      destinationId: kind === "income" ? account.id : undefined,
+    };
+    try {
+      await apiRequest("/v1/transactions", {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(body),
+      });
+    } catch (cause) {
+      if (navigator.onLine) throw cause;
+      await queueOfflineTransaction(body, idempotencyKey);
+      const pending: TransactionView = {
+        id: `offline:${idempotencyKey}`,
+        merchant: input.merchant,
         category: input.category,
+        pocket: pocket.name,
         pocketId: pocket.id,
-        occurredAt: new Date().toISOString(),
-        fundingSourceScope: pocket.visibility,
-        payerMemberId: input.payerMemberId,
-        sourceId: kind === "expense" ? account.id : undefined,
-        destinationId: kind === "income" ? account.id : undefined,
-      }),
-    });
+        payer:
+          state.members.find((member) => member.id === input.payerMemberId)
+            ?.displayName ?? state.settings.memberName,
+        amount: input.amount,
+        currency: pocket.currency,
+        scope: account.scope,
+        kind,
+        date: "Pendiente",
+        occurredAt: String(body.occurredAt),
+        syncStatus: "queued",
+        reviewStatus: "REVIEWED",
+        origin: "OFFLINE_SYNC",
+      };
+      financeData.update((current) => ({
+        ...current,
+        transactions: [pending, ...current.transactions],
+      }));
+      return;
+    }
     await hydrateFinanceData();
     return;
   }
@@ -714,6 +776,7 @@ export async function createTransaction(input: {
         ?.displayName ?? state.settings.memberName,
     amount: input.amount,
     currency: pocket.currency,
+    scope: pocket.visibility,
     kind,
     date: "Ahora",
     occurredAt: new Date().toISOString(),
@@ -779,6 +842,32 @@ export async function allocateToPocket(
         : pocket,
     ),
   }));
+}
+
+export async function transferBetweenPockets(
+  sourceId: string,
+  destinationPocketId: string,
+  amount: number,
+): Promise<void> {
+  if (!isServerMode()) {
+    financeData.update((state) => ({
+      ...state,
+      pockets: state.pockets.map((pocket) =>
+        pocket.id === sourceId
+          ? { ...pocket, currentAmount: pocket.currentAmount - amount }
+          : pocket.id === destinationPocketId
+            ? { ...pocket, currentAmount: pocket.currentAmount + amount }
+            : pocket,
+      ),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/pockets/${sourceId}/transfer`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ destinationPocketId, amount: String(amount) }),
+  });
+  await hydrateFinanceData();
 }
 
 export async function setPocketStatus(
@@ -1391,6 +1480,28 @@ export async function cancelExpectedIncome(incomeId: string): Promise<void> {
   await hydrateFinanceData();
 }
 
+export async function reconcileExpectedIncome(
+  incomeId: string,
+  attributionId: string,
+  actualAmount: number,
+): Promise<void> {
+  if (!isServerMode()) {
+    await updateExpectedIncome(incomeId, {
+      status: "received",
+      actualAmount,
+    });
+    return;
+  }
+  await apiRequest(`/v1/planning/expected-incomes/${incomeId}/receive`, {
+    method: "POST",
+    body: JSON.stringify({
+      attributionId,
+      actualAmount: String(actualAmount),
+    }),
+  });
+  await hydrateFinanceData();
+}
+
 export async function createFundingPlan(input: {
   title: string;
   purpose: string;
@@ -1745,6 +1856,23 @@ export async function executePlanAllocation(
     method: "POST",
     headers: { "Idempotency-Key": crypto.randomUUID() },
     body: JSON.stringify({ amount: String(amount) }),
+  });
+  await hydrateFinanceData();
+}
+
+export async function executeWholePlan(
+  planId: string,
+  expectedIncomeId: string,
+): Promise<void> {
+  if (!isServerMode()) {
+    throw new Error(
+      "La ejecución trazable del plan requiere el modo servidor.",
+    );
+  }
+  await apiRequest(`/v1/planning/plans/${planId}/execute`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ expectedIncomeId }),
   });
   await hydrateFinanceData();
 }

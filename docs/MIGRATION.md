@@ -7,6 +7,46 @@ La aplicación soporta rutas de instalación configurables y dos topologías exp
 
 Para el servidor doméstico actual siga [DEPLOY_PRIVATE_TAILSCALE.md](DEPLOY_PRIVATE_TAILSCALE.md). Esta guía resume los invariantes comunes.
 
+## Migración 202607270001: interconexiones financieras
+
+Antes de actualizar:
+
+1. Cree un backup cifrado.
+2. Ejecute `node scripts/init-env.mjs`. El script generará
+   `secrets/private-metadata-keyring.json` sin mostrar sus llaves.
+3. Conserve el llavero en todos los backups; perder una llave todavía usada
+   impide abrir los metadatos cifrados con ella. El backup formato 3 lo incluye.
+4. Ejecute las migraciones Prisma antes de iniciar la API.
+
+La migración es aditiva. Incorpora revisión, reglas, importaciones
+normalizadas, ejecuciones de planes, simulaciones, deudas, tasas y detalle de
+snapshots. No elimina ni reescribe movimientos existentes.
+
+La sincronización diaria de TRM es opcional:
+
+```dotenv
+TRM_SYNC_ENABLED=true
+TRM_PRIMARY_URL=https://www.superfinanciera.gov.co/SuperfinancieraWebServiceTRM/TCRMServicesWebService/TCRMServicesWebService
+TRM_FALLBACK_URL=https://www.datos.gov.co/resource/32sa-8pi3.json
+```
+
+OKLE consulta primero el Web Service SOAP oficial de la Superintendencia
+Financiera y utiliza Datos Abiertos solamente si la fuente primaria falla. En
+ambos casos persiste fuente, URL, fecha efectiva y fecha de consulta. Si la
+sincronización está desactivada, ejecuta el mismo orden bajo demanda cuando un
+snapshot requiere convertir USD a COP.
+
+## Migración 202607280001: alta, invitaciones e integraciones
+
+`202607280001_household_invites_integrations` es aditiva. Crea invitaciones de
+pareja de un solo uso y preferencias de TRM/Open Finance por hogar. No elimina
+usuarios, movimientos, bolsillos ni datos Firefly.
+
+En una instalación vacía, la primera persona abre la PWA y crea el hogar. En
+una instalación que ya tiene usuarios, el alta inicial permanece cerrada y el
+login histórico sigue funcionando. No ejecute nuevamente el bootstrap salvo
+recuperación administrativa deliberada.
+
 ## Preparar un destino
 
 ```bash
@@ -55,7 +95,8 @@ Los comandos usan `scripts/compose.sh`, que combina el archivo central con el ov
 
 - **Servidor completo:** use `scripts/backup.sh`; contiene dumps PostgreSQL, volúmenes necesarios, metadata de Git/imágenes y `env.secrets`.
 - **Modo local de la PWA:** exporte JSON desde **Más** e impórtelo en el servidor. Los movimientos demo no se convierten en movimientos bancarios.
-- **Secretos:** el backup los contiene para recuperación completa, pero nunca se versionan. Cifre la copia externa.
+- **Secretos:** el backup formato 3 contiene `.env` y el llavero privado para
+  recuperación completa, pero nunca se versionan. Cifre la copia externa.
 - **Firefly:** base y upload deben pertenecer al mismo backup.
 - **Entornos:** no restaure accidentalmente dev sobre prod; el script compara proyecto y commit.
 

@@ -794,6 +794,196 @@ export class PlanningService {
     });
   }
 
+  async executePlan(id: string, raw: unknown, key: string, actor: Actor) {
+    if (!key) throw new BadRequestException("Idempotency-Key es obligatorio");
+    const parsed = z
+      .object({ expectedIncomeId: z.string().uuid() })
+      .safeParse(raw);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    const plan = await this.prisma.financialPlan.findUnique({
+      where: { id },
+      include: {
+        allocations: {
+          where: { expectedIncomeId: parsed.data.expectedIncomeId },
+          orderBy: { priority: "asc" },
+        },
+      },
+    });
+    if (!plan || !this.canRead(plan, actor)) throw new NotFoundException();
+    const existingExecution = await this.prisma.planExecution.findUnique({
+      where: {
+        householdId_idempotencyKey: {
+          householdId: actor.householdId,
+          idempotencyKey: key,
+        },
+      },
+    });
+    if (existingExecution) return existingExecution;
+    const income = await this.expectedIncomeForActor(
+      parsed.data.expectedIncomeId,
+      actor,
+    );
+    if (income.status !== "received") {
+      throw new ConflictException(
+        "Confirma y concilia primero el ingreso real",
+      );
+    }
+    if (!plan.allocations.length) {
+      throw new BadRequestException(
+        "El plan no tiene destinos para este ingreso",
+      );
+    }
+    const base = income.actualAmount ?? income.expectedAmount;
+    const preview = previewExpectedIncomeFunding({
+      incomeAmount: base.toString(),
+      currency: plan.currency,
+      allocations: plan.allocations.map((allocation) => ({
+        targetId: allocation.id,
+        mode: allocation.mode as "fixed" | "percentage" | "remainder",
+        ...(allocation.value !== null
+          ? { value: allocation.value.toString() }
+          : {}),
+        priority: allocation.priority,
+      })),
+    });
+    if (Number(preview.overallocatedAmount) > 0) {
+      throw new ConflictException(
+        "El plan está sobreasignado y debe revisarse antes de ejecutarlo",
+      );
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const results: Array<{
+        allocationId: string;
+        amount: string;
+        pocketEventId: string | null;
+        paymentPlanId: string | null;
+      }> = [];
+      for (const allocation of plan.allocations) {
+        const amount = new Prisma.Decimal(
+          preview.allocations.find((item) => item.targetId === allocation.id)
+            ?.amount ?? 0,
+        );
+        if (amount.isZero()) continue;
+        let pocketEventId: string | null = null;
+        if (allocation.pocketId) {
+          const event = await tx.pocketEvent.create({
+            data: {
+              householdId: actor.householdId,
+              pocketId: allocation.pocketId,
+              actorMemberId: actor.memberId,
+              type: "allocated",
+              amount,
+              currency: plan.currency,
+              planningOnly: true,
+              idempotencyKey: `${key}:${allocation.id}`,
+              metadata: {
+                planId: plan.id,
+                planVersion: plan.version,
+                expectedIncomeId: income.id,
+              },
+            },
+          });
+          pocketEventId = event.id;
+          await tx.pocket.update({
+            where: { id: allocation.pocketId },
+            data: {
+              currentAmount: { increment: amount },
+              version: { increment: 1 },
+            },
+          });
+        }
+        await tx.planFundingAllocation.update({
+          where: { id: allocation.id },
+          data: {
+            executedAmount: amount,
+            status: "applied",
+            appliedAt: new Date(),
+            pocketEventId,
+          },
+        });
+        results.push({
+          allocationId: allocation.id,
+          amount: amount.toString(),
+          pocketEventId,
+          paymentPlanId: allocation.paymentPlanId,
+        });
+      }
+      const execution = await tx.planExecution.create({
+        data: {
+          householdId: actor.householdId,
+          planId: plan.id,
+          planVersion: plan.version,
+          expectedIncomeId: income.id,
+          actualTransactionId: income.actualTransactionAttributionId ?? null,
+          idempotencyKey: key,
+          allocationResult: {
+            incomeAmount: base.toString(),
+            currency: plan.currency,
+            allocations: results,
+            unassignedAmount: preview.unassignedAmount,
+          },
+          executedByMemberId: actor.memberId,
+        },
+      });
+      await tx.planAuditEvent.create({
+        data: {
+          householdId: actor.householdId,
+          planId: plan.id,
+          actorMemberId: actor.memberId,
+          action: "plan_executed",
+          details: {
+            planExecutionId: execution.id,
+            version: plan.version,
+            expectedIncomeId: income.id,
+          },
+        },
+      });
+      return execution;
+    });
+  }
+
+  async receiveExpectedIncome(id: string, raw: unknown, actor: Actor) {
+    const parsed = z
+      .object({
+        attributionId: z.string().uuid(),
+        actualAmount: PositiveMoney,
+      })
+      .safeParse(raw);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    const income = await this.expectedIncomeForActor(id, actor);
+    await this.ensureIncomeCanChange(id);
+    const attribution = await this.prisma.transactionAttribution.findFirst({
+      where: {
+        id: parsed.data.attributionId,
+        householdId: actor.householdId,
+        amount: new Prisma.Decimal(parsed.data.actualAmount),
+        currency: income.currency,
+      },
+    });
+    if (!attribution) {
+      throw new NotFoundException();
+    }
+    const updated = await this.prisma.expectedIncome.update({
+      where: { id },
+      data: {
+        status: "received",
+        actualAmount: new Prisma.Decimal(parsed.data.actualAmount),
+        receivedAt: attribution.occurredAt,
+        actualTransactionAttributionId: attribution.id,
+      },
+      include: { source: true },
+    });
+    await this.recordAudit(
+      actor,
+      "ExpectedIncome",
+      id,
+      "received_and_reconciled",
+      income,
+      updated,
+    );
+    return updated;
+  }
+
   private async planForActor(id: string, actor: Actor) {
     const plan = await this.prisma.financialPlan.findUnique({ where: { id } });
     if (!plan || !this.canRead(plan, actor)) throw new NotFoundException();

@@ -9,6 +9,7 @@ import {
   SECRET_KEYS,
   isValidVapidPrivateKey,
   isValidVapidPublicKey,
+  isValidPrivateMetadataKeyring,
   BUNDLED_N8N_SECRET_KEYS,
 } from "./lib/config.mjs";
 
@@ -96,6 +97,20 @@ if (localMode) {
     errors.push("VAPID_PUBLIC_KEY no es una clave pública VAPID válida");
   if (!isValidVapidPrivateKey(env.VAPID_PRIVATE_KEY))
     errors.push("VAPID_PRIVATE_KEY no es una clave privada VAPID válida");
+  const keyringPath = resolve(
+    root,
+    process.env.PRIVATE_METADATA_KEYRING_HOST_FILE ||
+      env.PRIVATE_METADATA_KEYRING_HOST_FILE ||
+      "secrets/private-metadata-keyring.json",
+  );
+  if (!existsSync(keyringPath)) {
+    errors.push(`Falta el llavero privado ${keyringPath}`);
+  } else {
+    if ((statSync(keyringPath).mode & 0o077) !== 0)
+      errors.push("El llavero privado debe tener permisos 0600");
+    if (!isValidPrivateMetadataKeyring(readFileSync(keyringPath, "utf8")))
+      errors.push("El llavero privado no tiene un formato o claves válidos");
+  }
 
   const aiProvider = (
     process.env.AI_PROVIDER ||
@@ -182,10 +197,14 @@ if (localMode) {
     const docker = command("docker", ["--version"]);
     if (docker.status !== 0)
       errors.push("Docker no está instalado o no es accesible");
-    const compose = command("docker", ["compose", "version"]);
-    if (compose.status !== 0)
+    const composePlugin = command("docker", ["compose", "version"]);
+    const composeStandalone = command("docker-compose", ["version"]);
+    if (composePlugin.status !== 0 && composeStandalone.status !== 0)
       errors.push("El plugin docker compose no está disponible");
-    if (docker.status === 0 && compose.status === 0) {
+    if (
+      docker.status === 0 &&
+      (composePlugin.status === 0 || composeStandalone.status === 0)
+    ) {
       const rendered = command("scripts/compose.sh", [
         "config",
         "--format",

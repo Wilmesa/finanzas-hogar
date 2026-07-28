@@ -1,5 +1,11 @@
 import { createECDH, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -88,6 +94,32 @@ if (
 const content = `${lines.filter(Boolean).join("\n")}\n`;
 writeFileSync(destination, content, { mode: 0o600 });
 chmodSync(destination, 0o600);
+
+const keyringPath = resolve(
+  root,
+  resultingValues.PRIVATE_METADATA_KEYRING_HOST_FILE ??
+    "secrets/private-metadata-keyring.json",
+);
+if (!existsSync(keyringPath)) {
+  mkdirSync(dirname(keyringPath), { recursive: true, mode: 0o700 });
+  writeFileSync(
+    keyringPath,
+    `${JSON.stringify(
+      {
+        activeKeyId: new Date().toISOString().slice(0, 7),
+        keys: {
+          [new Date().toISOString().slice(0, 7)]:
+            randomBytes(32).toString("base64"),
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    { mode: 0o600 },
+  );
+  chmodSync(keyringPath, 0o600);
+  generated.push("PRIVATE_METADATA_KEYRING_FILE");
+}
 
 console.log(
   existed ? ".env actualizado de forma idempotente." : ".env creado.",

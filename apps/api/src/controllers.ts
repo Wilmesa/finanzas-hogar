@@ -33,9 +33,16 @@ import { FireflyClient } from "./firefly.client.js";
 import { PlanningService } from "./planning.service.js";
 import { RemindersService } from "./reminders.service.js";
 import { HouseholdService } from "./household.service.js";
+import { HouseholdAccessService } from "./household-access.service.js";
+import { IntegrationsService } from "./integrations.service.js";
 import { CategoriesService } from "./categories.service.js";
 import { PaymentsService } from "./payments.service.js";
 import { PatrimonyService } from "./patrimony.service.js";
+import { ExchangeRatesService } from "./exchange-rates.service.js";
+import { IngestionService } from "./ingestion.service.js";
+import { MockOpenFinanceAdapter } from "./mock-open-finance.adapter.js";
+import { SimulationsService } from "./simulations.service.js";
+import { TransactionRulesService } from "./transaction-rules.service.js";
 import {
   TransactionsService,
   type CreateTransactionInput,
@@ -55,7 +62,10 @@ export class HealthController {
 
 @Controller("v1")
 export class HouseholdController {
-  constructor(private readonly households: HouseholdService) {}
+  constructor(
+    private readonly households: HouseholdService,
+    private readonly householdAccess: HouseholdAccessService,
+  ) {}
 
   @Get("household")
   household(@CurrentActor() actor: Actor) {
@@ -86,6 +96,11 @@ export class HouseholdController {
   @Post("onboarding/complete")
   complete(@CurrentActor() actor: Actor) {
     return this.households.completeOnboarding(actor);
+  }
+
+  @Post("household/invitations")
+  invite(@CurrentActor() actor: Actor) {
+    return this.householdAccess.createInvitation(actor);
   }
 }
 
@@ -154,6 +169,16 @@ export class PocketsController {
     if (!key) throw new BadRequestException("Idempotency-Key es obligatorio");
     return this.pockets.allocate(id, body, key, actor);
   }
+
+  @Post(":id/transfer")
+  transfer(
+    @Param("id") id: string,
+    @Body() body: { destinationPocketId?: string; amount?: string },
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.pockets.transfer(id, body, key ?? "", actor);
+  }
 }
 
 @Controller("v1/payments")
@@ -202,9 +227,10 @@ export class PaymentsController {
   markPaid(
     @Param("id") id: string,
     @Body() body: unknown,
+    @Headers("idempotency-key") key: string | undefined,
     @CurrentActor() actor: Actor,
   ) {
-    return this.payments.markPaid(id, body, actor);
+    return this.payments.markPaid(id, body, key ?? "", actor);
   }
 }
 
@@ -280,6 +306,35 @@ export class ProjectionsController {
   @Post("real-estate")
   realEstate(@Body() body: Parameters<typeof projectRealEstate>[0]) {
     return projectRealEstate(body);
+  }
+}
+
+@Controller("v1/simulations")
+export class SimulationsController {
+  constructor(private readonly simulations: SimulationsService) {}
+
+  @Get()
+  list(@CurrentActor() actor: Actor) {
+    return this.simulations.list(actor);
+  }
+
+  @Post()
+  save(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.simulations.save(body, actor);
+  }
+
+  @Post(":id/convert")
+  convert(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.simulations.convert(id, body, actor);
+  }
+
+  @Delete(":id")
+  archive(@Param("id") id: string, @CurrentActor() actor: Actor) {
+    return this.simulations.archive(id, actor);
   }
 }
 
@@ -461,6 +516,25 @@ export class PlanningController {
     return this.planning.archivePlan(id, actor);
   }
 
+  @Post("plans/:id/execute")
+  executePlan(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.planning.executePlan(id, body, key ?? "", actor);
+  }
+
+  @Post("expected-incomes/:id/receive")
+  receiveExpectedIncome(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.planning.receiveExpectedIncome(id, body, actor);
+  }
+
   @Post("allocations/:id/execute")
   executeAllocation(
     @Param("id") id: string,
@@ -505,9 +579,17 @@ export class TransactionsController {
   create(
     @Body() body: CreateTransactionInput,
     @Headers("idempotency-key") key: string | undefined,
+    @Headers("x-okle-offline-sync") offlineSync: string | undefined,
     @CurrentActor() actor: Actor,
   ) {
-    return this.transactions.create(body, key ?? "", actor);
+    return this.transactions.create(
+      body,
+      key ?? "",
+      actor,
+      offlineSync === "true"
+        ? { origin: "OFFLINE_SYNC", reviewStatus: "REVIEWED" }
+        : undefined,
+    );
   }
 
   @Patch(":id")
@@ -517,6 +599,133 @@ export class TransactionsController {
     @CurrentActor() actor: Actor,
   ) {
     return this.transactions.update(id, body, actor);
+  }
+}
+
+@Controller("v1/review")
+export class ReviewController {
+  constructor(private readonly transactions: TransactionsService) {}
+
+  @Get()
+  list(@CurrentActor() actor: Actor) {
+    return this.transactions.reviewQueue(actor);
+  }
+
+  @Patch(":id")
+  review(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.transactions.review(id, body, key ?? "", actor);
+  }
+}
+
+@Controller("v1/security")
+export class SecurityController {
+  constructor(private readonly transactions: TransactionsService) {}
+
+  @Post("private-metadata/rotate")
+  rotatePrivateMetadata(
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.transactions.rotatePrivateMetadata(key ?? "", actor);
+  }
+}
+
+@Controller("v1/transaction-rules")
+export class TransactionRulesController {
+  constructor(private readonly rules: TransactionRulesService) {}
+
+  @Get()
+  list(@CurrentActor() actor: Actor) {
+    return this.rules.list(actor);
+  }
+
+  @Post()
+  create(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.rules.create(body, actor);
+  }
+
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.rules.update(id, body, actor);
+  }
+
+  @Delete(":id")
+  archive(@Param("id") id: string, @CurrentActor() actor: Actor) {
+    return this.rules.archive(id, actor);
+  }
+}
+
+@Controller("v1/ingestion")
+export class IngestionController {
+  constructor(
+    private readonly ingestion: IngestionService,
+    private readonly mockOpenFinance: MockOpenFinanceAdapter,
+    private readonly integrations: IntegrationsService,
+  ) {}
+
+  @Post("transactions")
+  ingest(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.ingestion.ingest(body, actor);
+  }
+
+  @Post("mock-sandbox")
+  async ingestMock(
+    @Body() body: unknown,
+    @Headers("x-okle-open-finance-signature") signature: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    await this.integrations.assertMockEnabled(actor);
+    return this.ingestion.ingestFromProvider(
+      this.mockOpenFinance,
+      body,
+      {
+        "x-okle-open-finance-signature": signature ?? "",
+      },
+      actor,
+    );
+  }
+}
+
+@Controller("v1/integrations")
+export class IntegrationsController {
+  constructor(private readonly integrations: IntegrationsService) {}
+
+  @Get()
+  status(@CurrentActor() actor: Actor) {
+    return this.integrations.status(actor);
+  }
+
+  @Patch()
+  update(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.integrations.update(body, actor);
+  }
+
+  @Post("trm/refresh")
+  refreshTrm(@CurrentActor() actor: Actor) {
+    return this.integrations.refreshTrm(actor);
+  }
+}
+
+@Controller("v1/exchange-rates")
+export class ExchangeRatesController {
+  constructor(private readonly exchangeRates: ExchangeRatesService) {}
+
+  @Post("trm/refresh")
+  refresh(
+    @Body() body: { effectiveDate?: string },
+    @CurrentActor() actor: Actor,
+  ) {
+    if (actor.role !== "owner") throw new UnauthorizedException();
+    return this.exchangeRates.refreshTrm(body.effectiveDate);
   }
 }
 
@@ -564,6 +773,7 @@ export class AnalyticsController {
         where: {
           householdId: actor.householdId,
           ledgerScope: "household",
+          transactionType: "withdrawal",
           occurredAt: { gte: start },
         },
         select: {
@@ -665,7 +875,7 @@ export class InsightsController {
     const start = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
     );
-    const [transactions, household] = await Promise.all([
+    const [transactions, household, pockets] = await Promise.all([
       this.prisma.transactionAttribution.findMany({
         where: {
           householdId: actor.householdId,
@@ -673,17 +883,41 @@ export class InsightsController {
           ...(scope === "private" ? { payerMemberId: actor.memberId } : {}),
           occurredAt: { gte: start, lte: now },
         },
-        select: { id: true, amount: true, category: true },
+        select: {
+          id: true,
+          amount: true,
+          category: true,
+          transactionType: true,
+        },
       }),
       this.prisma.household.findUniqueOrThrow({
         where: { id: actor.householdId },
         select: { baseCurrency: true },
       }),
+      this.prisma.pocket.findMany({
+        where: {
+          householdId: actor.householdId,
+          status: "active",
+          ...(scope === "household"
+            ? { visibility: "household" }
+            : { visibility: "private", ownerMemberId: actor.memberId }),
+        },
+        select: {
+          id: true,
+          name: true,
+          currentAmount: true,
+          currency: true,
+          policy: true,
+        },
+      }),
     ]);
-    const spent = transactions.reduce(
-      (sum, item) => sum + Number(item.amount),
-      0,
+    const expenses = transactions.filter(
+      (item) => item.transactionType === "withdrawal",
     );
+    const receivedIncome = transactions
+      .filter((item) => item.transactionType === "deposit")
+      .reduce((sum, item) => sum + Number(item.amount), 0);
+    const spent = expenses.reduce((sum, item) => sum + Number(item.amount), 0);
     const evidence = transactions.slice(0, 50).map((item) => ({
       id: `transaction:${item.id}`,
       kind: "transaction",
@@ -721,7 +955,7 @@ export class InsightsController {
       })),
     );
     const categoryTotals = new Map<string, number>();
-    for (const item of transactions) {
+    for (const item of expenses) {
       const category = item.category ?? "Sin categoría";
       categoryTotals.set(
         category,
@@ -744,12 +978,30 @@ export class InsightsController {
       },
       currency: household.baseCurrency,
       metrics: {
-        income: "0",
+        income: receivedIncome.toString(),
         spent: spent.toString(),
         savingsRate: 0,
         safeDailySpend: "0",
       },
-      pockets: [],
+      stateBalances: {
+        REAL: null,
+        RESERVED: pockets
+          .filter((pocket) => pocket.currency === household.baseCurrency)
+          .reduce(
+            (sum, pocket) => sum.plus(pocket.currentAmount),
+            new Prisma.Decimal(0),
+          )
+          .toString(),
+        REAL_RESERVED_BALANCE: null,
+        PROJECTED: null,
+      },
+      pockets: pockets.map((pocket) => ({
+        id: pocket.id,
+        name: pocket.name,
+        currentAmount: pocket.currentAmount.toString(),
+        currency: pocket.currency,
+        policy: pocket.policy,
+      })),
       spendingBreakdown: [...categoryTotals.entries()].map(
         ([category, amount]) => ({ category, amount: amount.toString() }),
       ),

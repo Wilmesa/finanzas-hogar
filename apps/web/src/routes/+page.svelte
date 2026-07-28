@@ -1,6 +1,7 @@
 <script lang="ts">
   import { currency } from "$lib/demo";
   import { createTransaction, financeData } from "$lib/finance-store";
+  import { isServerMode } from "$lib/auth";
   import PocketCard from "$lib/PocketCard.svelte";
   let showQuickEntry = $state(false);
   let amount = $state<number | undefined>();
@@ -25,20 +26,73 @@
       .filter((account) => account.scope === scope && account.currency === $financeData.settings.baseCurrency)
       .reduce((sum, account) => sum + account.currentBalance, 0),
   );
-  const available = $derived(accountBalance - reserved);
+  const accountConnection = $derived(
+    $financeData.accountConnections.find(
+      (connection) => connection.scope === scope,
+    ),
+  );
+  const accountBalanceKnown = $derived(
+    !isServerMode() || accountConnection?.status === "available",
+  );
+  const available = $derived(
+    accountBalanceKnown ? accountBalance - reserved : null,
+  );
+  const currentMonthStart = new Date(
+    new Date().getFullYear(),
+    new Date().getMonth(),
+    1,
+  ).getTime();
   const monthlySpent = $derived(
     transactions
-      .filter((transaction) => transaction.kind === "expense" && transaction.currency === $financeData.settings.baseCurrency)
+      .filter(
+        (transaction) =>
+          transaction.kind === "expense" &&
+          transaction.scope === scope &&
+          transaction.currency === $financeData.settings.baseCurrency &&
+          new Date(transaction.occurredAt).getTime() >= currentMonthStart,
+      )
       .reduce((sum, transaction) => sum + transaction.amount, 0),
   );
-  const dailyPocket = $derived(pockets.find((pocket) => pocket.id === "daily"));
+  const dailyPocket = $derived(
+    pockets.find(
+      (pocket) =>
+        pocket.visibility === scope &&
+        pocket.currency === $financeData.settings.baseCurrency &&
+        pocket.status === "active" &&
+        pocket.policyKind === "periodic_spend",
+    ),
+  );
+  const dailyPocketSpent = $derived(
+    dailyPocket
+      ? transactions
+          .filter(
+            (transaction) =>
+              transaction.kind === "expense" &&
+              transaction.scope === scope &&
+              transaction.pocketId === dailyPocket.id &&
+              transaction.currency === dailyPocket.currency &&
+              new Date(transaction.occurredAt).getTime() >= currentMonthStart,
+          )
+          .reduce((sum, transaction) => sum + transaction.amount, 0)
+      : 0,
+  );
+  const daysRemainingThisMonth = new Date(
+    new Date().getFullYear(),
+    new Date().getMonth() + 1,
+    0,
+  ).getDate() - new Date().getDate() + 1;
   const nextIncome = $derived(
     [...$financeData.expectedIncomes]
       .filter((income) => income.status !== "cancelled" && income.status !== "received")
       .sort((left, right) => left.expectedDate.localeCompare(right.expectedDate))[0],
   );
   const budgetUsed = $derived(
-    dailyPocket ? Math.min(100, Math.round(((dailyPocket.targetAmount - dailyPocket.currentAmount) / dailyPocket.targetAmount) * 100)) : 0,
+    dailyPocket && dailyPocket.targetAmount > 0
+      ? Math.min(
+          100,
+          Math.round((dailyPocketSpent / dailyPocket.targetAmount) * 100),
+        )
+      : null,
   );
   const latestInsight = $derived($financeData.insights.find((item) => item.scope === scope));
   const latestBundle = $derived(latestInsight?.payload.bundle);
@@ -83,7 +137,7 @@
 
 <div class="page home-page">
   <header class="page-header">
-    <div><span class="eyebrow">{new Intl.DateTimeFormat("es-CO", { dateStyle: "full" }).format(new Date())}</span><h1>Buenos días, {$financeData.settings.memberName}</h1><p>{$financeData.settings.householdName} · datos actualizados desde Firefly.</p></div>
+    <div><span class="eyebrow">{new Intl.DateTimeFormat("es-CO", { dateStyle: "full" }).format(new Date())}</span><h1>Buenos días, {$financeData.settings.memberName}</h1><p>{$financeData.settings.householdName} · {accountBalanceKnown ? "saldo real actualizado desde Firefly." : accountConnection?.configured ? "Firefly no está disponible en este momento." : "conecta Firefly para consultar el saldo real."}</p></div>
     <a class="avatar-button" href="/household" aria-label="Abrir perfil">{$financeData.settings.memberAvatar ?? $financeData.settings.memberName.slice(0,1).toUpperCase()}</a>
   </header>
   <div class="filter-tabs"><button class:active={scope === "household"} onclick={() => (scope = "household")}>Compartido</button><button class:active={scope === "private"} onclick={() => (scope = "private")}>Solo yo</button></div>
@@ -91,13 +145,18 @@
   <section class="hero-balance">
     <div>
       <span class="eyebrow">Disponible después de compromisos</span>
-      <strong>{currency(available)}</strong>
-      <small>Saldo real {currency(accountBalance)} menos {currency(reserved)} reservado</small>
+      <strong>{available === null ? "—" : currency(available)}</strong>
+      <small>{accountBalanceKnown ? `Saldo real ${currency(accountBalance)} menos ${currency(reserved)} reservado virtualmente` : `Saldo real no disponible · ${currency(reserved)} reservado virtualmente en OKLE`}</small>
     </div>
     <div class="hero-progress">
-      <div><span>Presupuesto usado</span><b>{budgetUsed}%</b></div>
-      <div class="progress light"><span style={`width: ${budgetUsed}%`}></span></div>
-      <p>Gasto registrado: <strong>{currency(monthlySpent)}</strong>. Disponible diario estimado: <strong>{currency((dailyPocket?.currentAmount ?? 0) / 12)}</strong>.</p>
+      {#if budgetUsed === null}
+        <div><span>Presupuesto de vida diaria</span><b>Sin configurar</b></div>
+        <p>Crea un bolsillo con límite periódico para calcular el ritmo de gasto.</p>
+      {:else}
+        <div><span>Presupuesto usado este mes</span><b>{budgetUsed}%</b></div>
+        <div class="progress light"><span style={`width: ${budgetUsed}%`}></span></div>
+        <p>Gasto del mes: <strong>{currency(monthlySpent)}</strong>. Disponible diario estimado en «{dailyPocket?.name}»: <strong>{currency((dailyPocket?.currentAmount ?? 0) / daysRemainingThisMonth)}</strong>.</p>
+      {/if}
     </div>
   </section>
 

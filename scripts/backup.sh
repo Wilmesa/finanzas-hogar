@@ -56,6 +56,14 @@ archive_volume "${project_name}_caddy_config" caddy-config.tar.gz
 
 cp .env "$backup_dir/env.secrets"
 chmod 600 "$backup_dir/env.secrets"
+keyring_path=$(sed -n 's/^PRIVATE_METADATA_KEYRING_HOST_FILE=//p' .env | tail -n 1)
+keyring_path=${keyring_path:-secrets/private-metadata-keyring.json}
+if [ ! -f "$keyring_path" ]; then
+  echo "Falta el llavero privado $keyring_path; el backup se cancela." >&2
+  exit 1
+fi
+cp "$keyring_path" "$backup_dir/private-metadata-keyring.json"
+chmod 600 "$backup_dir/private-metadata-keyring.json"
 if [ -d runtime/keycloak ]; then cp -R runtime/keycloak "$backup_dir/runtime/"; fi
 cp docker-compose*.yml "$backup_dir/compose/"
 scripts/compose.sh images > "$backup_dir/images.txt"
@@ -68,7 +76,7 @@ scripts/compose.sh images > "$backup_dir/images.txt"
   echo "DEPLOY_TARGET=$deploy_target"
   echo "AUTH_MODE=${auth_mode:-local}"
   echo "ENABLE_BUNDLED_N8N=${enable_bundled_n8n:-false}"
-  echo "BACKUP_FORMAT=2"
+  echo "BACKUP_FORMAT=3"
 } > "$backup_dir/metadata.env"
 
 (cd "$backup_dir" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)

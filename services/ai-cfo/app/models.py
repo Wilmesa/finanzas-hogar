@@ -34,12 +34,21 @@ class NewsInput(BaseModel):
     summary: str
 
 
+class StateBalances(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    REAL: str | None = None
+    RESERVED: str
+    REAL_RESERVED_BALANCE: str | None = None
+    PROJECTED: str | None = None
+
+
 class InsightSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scope: Literal["household", "private"]
     period: Period
     currency: str
     metrics: Metrics
+    stateBalances: StateBalances
     pockets: list[dict] = Field(default_factory=list)
     spendingBreakdown: list[dict] = Field(default_factory=list)
     recurringPatterns: list[dict] = Field(default_factory=list)

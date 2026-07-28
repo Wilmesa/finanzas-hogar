@@ -4,6 +4,8 @@ import {
   isUnsafeSecret,
   isValidVapidPrivateKey,
   isValidVapidPublicKey,
+  isValidPrivateMetadataKey,
+  isValidPrivateMetadataKeyring,
   normalizeAppOrigin,
   parseEnv,
   renderRealm,
@@ -50,4 +52,34 @@ test("valida el tamaño y alfabeto de claves VAPID", () => {
   assert.equal(isValidVapidPrivateKey("b".repeat(43)), true);
   assert.equal(isValidVapidPublicKey("GENERATE_ME"), false);
   assert.equal(isValidVapidPrivateKey("con espacios"), false);
+});
+
+test("valida una clave AES privada de exactamente 32 bytes", () => {
+  assert.equal(
+    isValidPrivateMetadataKey(Buffer.alloc(32, 7).toString("base64")),
+    true,
+  );
+  assert.equal(
+    isValidPrivateMetadataKey(Buffer.alloc(16, 7).toString("base64")),
+    false,
+  );
+  assert.equal(isValidPrivateMetadataKey("GENERATE_ME"), false);
+});
+
+test("valida llavero versionado y rechaza una llave activa ausente", () => {
+  const key = Buffer.alloc(32, 7).toString("base64");
+  assert.equal(
+    isValidPrivateMetadataKeyring({
+      activeKeyId: "2026-07",
+      keys: { "2026-06": key, "2026-07": key },
+    }),
+    true,
+  );
+  assert.equal(
+    isValidPrivateMetadataKeyring({
+      activeKeyId: "missing",
+      keys: { "2026-07": key },
+    }),
+    false,
+  );
 });

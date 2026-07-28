@@ -14,8 +14,10 @@
     loadPlanHistory,
     recordPlanReview,
     executePlanAllocation,
+    executeWholePlan,
     updateFundingPlan,
     updateExpectedIncome,
+    reconcileExpectedIncome,
     updateIncomeSource,
   } from "$lib/finance-store";
   import type { ExpectedIncomeView, FundingPlanView, IncomeSourceView } from "$lib/types";
@@ -404,6 +406,51 @@
     success = "Asignación ejecutada. El saldo pendiente continúa visible.";
   }
 
+  async function executePlanForIncome(plan: FundingPlanView, expectedIncomeId: string) {
+    if (!confirm(`¿Aplicar la versión ${plan.version} de “${plan.title}” completa para este ingreso?`)) return;
+    try {
+      await executeWholePlan(plan.id, expectedIncomeId);
+      success = `Plan ejecutado con la versión ${plan.version}; las reservas quedaron trazables.`;
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible ejecutar el plan";
+    }
+  }
+
+  async function confirmIncomeReceived(income: ExpectedIncomeView) {
+    const candidates = $financeData.transactions.filter(
+      (transaction) =>
+        transaction.kind === "income" &&
+        transaction.currency === income.currency &&
+        transaction.syncStatus !== "queued",
+    );
+    if (!candidates.length) {
+      error = "Registra primero el ingreso real en Movimientos para poder conciliarlo.";
+      return;
+    }
+    const options = candidates
+      .slice(0, 10)
+      .map(
+        (transaction, index) =>
+          `${index + 1}. ${transaction.merchant} · ${currency(transaction.amount, transaction.currency)} · ${transaction.date}`,
+      )
+      .join("\n");
+    const selected = Number(
+      prompt(`Selecciona el ingreso real que llegó:\n${options}`, "1"),
+    );
+    const transaction = candidates[selected - 1];
+    if (!transaction) return;
+    try {
+      await reconcileExpectedIncome(
+        income.id,
+        transaction.id,
+        transaction.amount,
+      );
+      success = "Ingreso real conciliado. Ya puedes ejecutar el acuerdo guardado.";
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible conciliar el ingreso";
+    }
+  }
+
   function addAllocation() {
     allocationDrafts.push({
       pocketId:
@@ -550,7 +597,7 @@
         <article class="income-card">
           <div class="timeline-dot"></div>
           <div><span class="eyebrow">{bucketLabels[income.timeBucket]} · {income.expectedDate}</span><h3>{income.sourceName}</h3><p>{income.reason}</p>{#if income.notes}<small>{income.notes}</small>{/if}</div>
-          <div class="income-number"><strong>{currency(income.expectedAmount, income.currency)}</strong><span class={`status ${income.status}`}>{income.status === "confirmed" ? "Confirmado" : income.status === "received" ? "Recibido" : "Estimado"} · {Math.round(income.probability * 100)}%</span><small>{income.updatedAt ? `Editado ${new Date(income.updatedAt).toLocaleDateString("es-CO")}` : "Guardado"}</small><div class="row-actions"><button onclick={() => editIncome(income)}>Editar</button>{#if income.status !== "received"}<button class="danger-text" disabled={actionId === income.id} onclick={() => cancelIncome(income)}>{actionId === income.id ? "Cancelando…" : "Cancelar"}</button>{/if}</div></div>
+          <div class="income-number"><strong>{currency(income.expectedAmount, income.currency)}</strong><span class={`status ${income.status}`}>{income.status === "confirmed" ? "Confirmado" : income.status === "received" ? "Recibido" : "Estimado"} · {Math.round(income.probability * 100)}%</span><small>{income.updatedAt ? `Editado ${new Date(income.updatedAt).toLocaleDateString("es-CO")}` : "Guardado"}</small><div class="row-actions"><button onclick={() => editIncome(income)}>Editar</button>{#if income.status !== "received"}<button onclick={() => confirmIncomeReceived(income)}>Conciliar llegada</button><button class="danger-text" disabled={actionId === income.id} onclick={() => cancelIncome(income)}>{actionId === income.id ? "Cancelando…" : "Cancelar"}</button>{/if}</div></div>
         </article>
       {/each}
       {#if activeExpectedIncomes.length === 0}<p class="empty-state">Aún no hay ingresos futuros activos.</p>{/if}
@@ -566,6 +613,7 @@
           <header><div><span class="privacy">{plan.visibility === "private" ? "Solo yo" : "Compartido"}</span><span class={`status ${plan.status}`}>{plan.status}</span></div><small>Versión {plan.version} · {plan.updatedAt ? new Date(plan.updatedAt).toLocaleString("es-CO") : "Guardado"}</small></header>
           <h3>{plan.title}</h3><p>{plan.purpose}</p>
           <div class="plan-destinations">
+            {#each [...new Set(plan.allocations.map((allocation) => allocation.expectedIncomeId))] as expectedIncomeId}{#if $financeData.expectedIncomes.find((income) => income.id === expectedIncomeId)?.status === "received" && plan.allocations.some((allocation) => allocation.expectedIncomeId === expectedIncomeId && allocation.status !== "applied")}<button class="secondary-button" onclick={() => executePlanForIncome(plan, expectedIncomeId)}>Aplicar versión {plan.version} completa</button>{/if}{/each}
             {#each plan.allocations as allocation}<div><span>{allocation.sourceName} → <b>{allocation.pocketName}</b></span><strong>{allocation.mode === "fixed" ? currency(allocation.value ?? 0, plan.currency) : allocation.mode === "percentage" ? `${Math.round((allocation.value ?? 0) * 100)} %` : "Remanente"}</strong><small>{allocation.rationale}</small><small>Ejecutado: {currency(allocation.executedAmount ?? 0, plan.currency)} · {allocation.status ?? "planeado"}</small>{#if $financeData.expectedIncomes.find((income) => income.id === allocation.expectedIncomeId)?.status === "received" && allocation.status !== "applied"}<button class="text-button" onclick={() => executeAllocation(allocation)}>Ejecutar total o parcial</button>{/if}</div>{/each}
           </div>
           <div class="row-actions"><button onclick={() => editPlan(plan)}>Editar plan y destinos</button><button class="primary-button subtle" onclick={() => toggleHistory(plan)}>{expandedPlanId === plan.id ? "Ocultar historia" : "Revisar acuerdo"}</button><button class="danger-text" disabled={actionId === plan.id} onclick={() => removePlan(plan)}>{actionId === plan.id ? "Archivando…" : "Archivar"}</button></div>

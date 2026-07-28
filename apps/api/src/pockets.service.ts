@@ -164,7 +164,7 @@ export class PocketsService {
                 householdId: actor.householdId,
                 pocketId: pocket.id,
                 actorMemberId: actor.memberId,
-                type: "transferred",
+                type: "released",
                 amount: pocket.currentAmount,
                 currency: pocket.currency,
                 planningOnly: true,
@@ -175,7 +175,7 @@ export class PocketsService {
                 householdId: actor.householdId,
                 pocketId: destination.id,
                 actorMemberId: actor.memberId,
-                type: "transferred",
+                type: "allocated",
                 amount: pocket.currentAmount,
                 currency: pocket.currency,
                 planningOnly: true,
@@ -300,6 +300,119 @@ export class PocketsService {
         error.code === "P2002"
       ) {
         throw new ConflictException("Esta operación ya fue procesada");
+      }
+      throw error;
+    }
+  }
+
+  async transfer(
+    sourceId: string,
+    raw: { destinationPocketId?: string; amount?: string },
+    idempotencyKey: string,
+    actor: Actor,
+  ) {
+    if (!idempotencyKey) {
+      throw new BadRequestException("Idempotency-Key es obligatorio");
+    }
+    const amount = new Decimal(raw.amount ?? 0);
+    if (!amount.isPositive()) {
+      throw new BadRequestException("La cantidad debe ser mayor que cero");
+    }
+    if (!raw.destinationPocketId || raw.destinationPocketId === sourceId) {
+      throw new BadRequestException("Selecciona otro bolsillo de destino");
+    }
+    const [source, destination] = await Promise.all([
+      this.find(sourceId, actor),
+      this.find(raw.destinationPocketId, actor),
+    ]);
+    if (
+      source.currency !== destination.currency ||
+      source.visibility !== destination.visibility ||
+      source.status !== "active" ||
+      destination.status !== "active"
+    ) {
+      throw new BadRequestException(
+        "Los bolsillos deben estar activos y usar la misma moneda y visibilidad",
+      );
+    }
+    if (amount.greaterThan(source.currentAmount)) {
+      throw new BadRequestException(
+        "El bolsillo de origen no tiene saldo suficiente",
+      );
+    }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const events = await Promise.all([
+          tx.pocketEvent.create({
+            data: {
+              householdId: actor.householdId,
+              pocketId: source.id,
+              actorMemberId: actor.memberId,
+              type: "released",
+              amount: new Prisma.Decimal(amount.toString()),
+              currency: source.currency,
+              planningOnly: true,
+              idempotencyKey: `${idempotencyKey}:released`,
+              metadata: { destinationPocketId: destination.id },
+            },
+          }),
+          tx.pocketEvent.create({
+            data: {
+              householdId: actor.householdId,
+              pocketId: destination.id,
+              actorMemberId: actor.memberId,
+              type: "allocated",
+              amount: new Prisma.Decimal(amount.toString()),
+              currency: source.currency,
+              planningOnly: true,
+              idempotencyKey: `${idempotencyKey}:allocated`,
+              metadata: { sourcePocketId: source.id },
+            },
+          }),
+        ]);
+        await Promise.all([
+          tx.pocket.update({
+            where: { id: source.id },
+            data: {
+              currentAmount: {
+                decrement: new Prisma.Decimal(amount.toString()),
+              },
+              version: { increment: 1 },
+            },
+          }),
+          tx.pocket.update({
+            where: { id: destination.id },
+            data: {
+              currentAmount: {
+                increment: new Prisma.Decimal(amount.toString()),
+              },
+              version: { increment: 1 },
+            },
+          }),
+        ]);
+        return { sourceId: source.id, destinationId: destination.id, events };
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        const existing = await this.prisma.pocketEvent.findUnique({
+          where: {
+            householdId_idempotencyKey: {
+              householdId: actor.householdId,
+              idempotencyKey: `${idempotencyKey}:released`,
+            },
+          },
+        });
+        if (existing) {
+          return {
+            sourceId: source.id,
+            destinationId: destination.id,
+            events: [existing],
+            replayed: true,
+          };
+        }
       }
       throw error;
     }

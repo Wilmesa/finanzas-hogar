@@ -49,4 +49,11 @@ case "$deploy_target:$auth_mode:$enable_bundled_n8n" in
     ;;
 esac
 
-exec docker compose "$@"
+if docker compose version >/dev/null 2>&1; then
+  exec docker compose "$@"
+fi
+if command -v docker-compose >/dev/null 2>&1; then
+  exec docker-compose "$@"
+fi
+echo "Docker Compose no está instalado o no es accesible" >&2
+exit 127

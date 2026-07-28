@@ -12,6 +12,7 @@
   import { apiRequest } from "$lib/api";
   import PwaStatus from "$lib/PwaStatus.svelte";
   import NotificationSettings from "$lib/NotificationSettings.svelte";
+  import IntegrationSettings from "$lib/IntegrationSettings.svelte";
   import { onMount } from "svelte";
   let message = $state("");
   let error = $state("");
@@ -144,6 +145,7 @@
     <div class="section-heading"><div><span class="eyebrow">Accesos financieros</span><h2 id="planning-shortcuts-title">Planear y cumplir</h2></div></div>
     <div class="shortcut-grid">
       <a href="/planning"><span>⌁</span><strong>Plan financiero</strong><small>Sueldos futuros, primas y destinos</small></a>
+      <a href="/review"><span>⌕</span><strong>Bandeja de revisión</strong><small>Movimientos importados y reglas</small></a>
       <a class="payments-shortcut" href="/payments"><span>✓</span><strong>Pagos</strong><small>Servicios, cuotas y vencimientos</small></a>
       <a href="/patrimony"><span>↗</span><strong>Patrimonio</strong><small>Inversiones, CDT e inmuebles</small></a>
       <a href="/future"><span>◫</span><strong>Simuladores</strong><small>Deudas y proyecciones futuras</small></a>
@@ -151,6 +153,7 @@
   </section>
   <PwaStatus />
   <NotificationSettings />
+  <IntegrationSettings />
   <section class="panel section-block">
     <span class="eyebrow">Clasificación del hogar</span><h2>Categorías</h2><p>Personaliza las etiquetas usadas al registrar y corregir movimientos.</p>
     <div class="category-grid">{#each $financeData.categories as category}<div class="category-chip" style={`--category-color:${category.color}`}><span>{category.name}</span><button onclick={() => editCategory(category)}>Editar</button><button class="danger-text" onclick={() => removeCategory(category)}>Archivar</button></div>{/each}</div>
@@ -175,6 +178,7 @@
       <a href="/household"><span class="settings-icon">♙</span><span><strong>Hogar y perfiles</strong><small>{$financeData.members.length} miembros · {$financeData.settings.baseCurrency}</small></span><b>›</b></a>
       <a href="/accounts"><span class="settings-icon">◇</span><span><strong>Cuentas y tarjetas</strong><small>Libros compartido y privado en Firefly</small></span><b>›</b></a>
       <a href="/pockets"><span class="settings-icon">◎</span><span><strong>Bolsillos</strong><small>Propósitos, metas y privacidad</small></span><b>›</b></a>
+      <a href="/review"><span class="settings-icon">⌕</span><span><strong>Revisión y reglas</strong><small>Validar movimientos importados</small></span><b>›</b></a>
       <a href="/onboarding"><span class="settings-icon">✓</span><span><strong>Revisar configuración</strong><small>Diagnóstico guiado de OKLE</small></span><b>›</b></a>
       <button onclick={downloadExport}><span class="settings-icon">⇩</span><span><strong>Exportar y respaldar</strong><small>Descargar un JSON portable</small></span><b>›</b></button>
       <label class="import-action"><span class="settings-icon">⇧</span><span><strong>Importar datos</strong><small>Restaurar una exportación JSON</small></span><b>›</b><input class="sr-only" type="file" accept="application/json" onchange={importFile} /></label>
