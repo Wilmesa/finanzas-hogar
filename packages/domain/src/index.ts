@@ -3,3 +3,4 @@ export * from "./money.js";
 export * from "./planning.js";
 export * from "./pockets.js";
 export * from "./projections.js";
+export * from "./matching.js";

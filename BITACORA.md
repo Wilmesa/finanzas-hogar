@@ -13,6 +13,59 @@ Este documento es la fuente de verdad operativa del proyecto. Registra qué se c
 
 ## Registro cronológico
 
+### 2026-07-27 — Interconexión contable, revisión y resiliencia PWA
+
+#### Implementado
+
+- Firefly continúa como único libro real; los gastos llevan tags de bolsillo y
+  no se usan Piggy Banks.
+- Transferencias virtuales `released` + `allocated` sin llamada a Firefly.
+- `Needs Review`, reglas priorizadas y vista móvil con gestos.
+- Ingesta normalizada, deduplicación exacta/difusa y detección de ingreso
+  extraordinario.
+- Datos privados sanitizados en Firefly y cifrados con AES-256-GCM.
+- Ejecución en bloque de planes conservando versión y resultado.
+- Simulaciones persistentes convertibles en bolsillos o pagos/deudas.
+- Confirmar un pago registra el retiro Firefly y recalcula la deuda.
+- Snapshots inmutables con tasas; USD/COP utiliza la TRM oficial.
+- Captura offline local en IndexedDB con el mismo UUID en cada reintento.
+- AI-CFO con separación explícita de REAL, RESERVED y PROJECTED.
+- Reasignar un bolsillo desde la bandeja revierte el impacto anterior y aplica
+  el nuevo sin crear otro movimiento Firefly. La bandeja privada descifra
+  comercio/categoría solo para su propietario y conserva las correcciones
+  sensibles cifradas.
+
+#### Funciona
+
+- Registro completamente manual sin proveedor bancario.
+- Prisma y TypeScript estrictos.
+- Pruebas de dominio, API, web y AI-CFO.
+- Degradación del proveedor de IA sin bloquear funciones financieras.
+- Verificación final: `CI=true pnpm verify` aprobó 24 pruebas de dominio, 2
+  web, 40 API, builds web/API y formato; `pytest` aprobó 7 pruebas AI-CFO.
+- Un intento de `pnpm verify` sin `CI=true` no inició las pruebas porque el
+  wrapper local intentó consultar npm y purgar `node_modules` sin TTY. La
+  repetición equivalente a CI se completó correctamente.
+
+#### Parcial o pendiente
+
+- Existe `IOpenFinanceProvider` y una ingesta normalizada, pero un adaptador
+  Belvo/Ozone requiere credenciales, contrato y formato de firma elegidos.
+- La detección de prima devuelve planes candidatos; falta un Web Push dedicado
+  con acción de confirmación.
+- TRM cubre USD/COP. EUR y cripto requieren fuentes adicionales.
+- Background Sync automático funciona con autenticación local; OIDC mantiene
+  la regla de no persistir tokens.
+- Para escala comercial faltan firma/replay protection del proveedor elegido,
+  DLQ BullMQ, rotación administrada de cifrado y E2E con infraestructura real.
+- Docker no está instalado en esta estación: 10 pruebas operativas pasaron y 7
+  validaciones Compose se omitieron. No se ejecutaron builds Docker locales.
+
+#### Migración
+
+La migración `202607270001_financial_interconnections` es aditiva. Debe
+conservarse `PRIVATE_METADATA_ENCRYPTION_KEY`; consulte `docs/MIGRATION.md`.
+
 ### 2026-07-20 — Aislamiento completo del n8n integrado
 
 - GitHub Actions reveló que un servicio bajo `profiles` sigue interpolando variables requeridas durante `docker compose config`; por eso el target normal exigía `N8N_ENCRYPTION_KEY` aunque n8n no estuviera activo.
@@ -313,8 +366,8 @@ La API compara cada minuto aproximado con los horarios individuales, evita dupli
 
 ## Antes de producción
 
-- [ ] Instalar Docker Engine y Compose en la máquina de prueba o servidor.
-- [ ] Ejecutar el preflight sin errores.
+- [x] Instalar Docker Engine/Compose y ejecutar el stack en una VM local limpia.
+- [x] Ejecutar el preflight sin errores de configuración.
 - [ ] Sustituir todos los secretos de ejemplo.
 - [ ] Configurar dominio, DNS y TLS.
 - [ ] Ejecutar `scripts/bootstrap-local-users.sh` y probar ambos usuarios locales.
@@ -346,7 +399,91 @@ Esta lista debe reducirse antes de declarar versión estable:
 - Alertas n8n previas a ingresos sin plan y reunión financiera periódica.
 - Pruebas unitarias de API/PWA y suite permanente de regresión visual móvil/escritorio.
 - Instaladores móviles Capacitor y firma de tiendas.
-- Open Banking y lectura de notificaciones, reservados para Fase 2.
+- Adaptador firmado del proveedor Open Finance real; el sandbox local ya cubre
+  `pending → posted`, cambio de identificador e idempotencia.
+
+## 2026-07-28 — TRM primaria, sandbox Open Finance, llavero y Docker real
+
+### 1. TRM sin punto único de falla
+
+- `ExchangeRatesService` consulta primero `queryTCRM` en el Web Service SOAP de
+  la Superintendencia Financiera. Datos Abiertos Colombia (`32sa-8pi3`) quedó
+  exclusivamente como fallback.
+- La respuesta se valida por `success`, valor positivo y vigencia. La tasa se
+  persiste con fuente, URL, fecha efectiva y fecha de consulta.
+- Prueba real desde el contenedor API el 28 de julio: `USD/COP = 3205.8`,
+  fuente `Superintendencia Financiera de Colombia / Web Service TRM`.
+- Dos pruebas unitarias cubren fuente primaria y caída primaria con fallback.
+
+### 2. Open Finance reproducible sin banco real
+
+- Se formalizó `IOpenFinanceProvider` y se implementó
+  `MockOpenFinanceAdapter`, desactivado por defecto y autenticado con
+  HMAC-SHA256.
+- `scripts/mock-open-finance.mjs` puede emitir un lote pendiente, publicado o
+  ambas fases. El banco simulado cambia el identificador externo al publicar.
+- La ingesta fusiona el cambio `pending → posted`, actualiza el registro
+  importado y reutiliza la atribución/transacción Firefly. La prueba de servicio
+  confirma una sola llamada a Firefly.
+- No se ejecutó una inyección bancaria completa contra el Firefly efímero
+  porque no existen PAT de libros configurados en esta estación. No se inventó
+  un token ni se debilitó la autenticación. La integración con Belvo/Ozone
+  continúa dependiendo de credenciales, consentimiento y firma del proveedor.
+
+### 3. Ciclo de vida criptográfico
+
+- Se reemplazó la dependencia de una sola llave en `.env` por un llavero
+  versionado `secrets/private-metadata-keyring.json`, permisos `0600`, ignorado
+  por Git y montado en la API como secreto de solo lectura.
+- Los sobres nuevos son `v2.keyId.iv.tag.ciphertext`; `keyId` también forma
+  parte del AAD de AES-256-GCM. Se conservó lectura `v1` solo para migración.
+- `POST /v1/security/private-metadata/rotate` recifra únicamente los registros
+  privados del miembro autenticado, exige idempotencia y deja auditoría.
+- Backup formato 3 incluye el llavero; restauración admite formatos 2 y 3. El
+  preflight valida JSON, llave activa, 32 bytes Base64 y permisos.
+- Límite declarado: es un KMS local simulado para uso doméstico. El robo
+  aislado de `.env` ya no entrega la llave, pero `root`, el socket Docker o el
+  proceso API comprometido todavía pueden leer el secreto. SaaS requiere
+  KMS/HSM/Vault externo.
+
+### 4. Orquestación Docker observada
+
+- Se instalaron Colima `0.10.3`, Docker CLI `29.6.2` y Docker Compose `5.3.1`.
+  `scripts/compose.sh` admite tanto el plugin como el binario standalone.
+- El primer build no se ocultó: falló con errores de E/S cuando el disco del
+  host llegó a aproximadamente 116 MiB libres. Se eliminó únicamente la VM
+  temporal corrupta y caché de Colima; no contenía datos de OKLE. Después de
+  liberar espacio se creó una VM limpia de 4 CPU, 8 GiB RAM y disco de 20 GiB.
+- Las imágenes `api`, `web` y `ai-cfo` se construyeron desde el estado final.
+  PostgreSQL, Redis, Firefly III `6.6.3`, AI-CFO, API, PWA y gateway quedaron
+  `healthy`.
+- Las nueve migraciones Prisma se aplicaron en una base vacía, incluida
+  `202607270001_financial_interconnections`, sin eliminar migraciones.
+- El smoke test verificó API→PostgreSQL, API→Redis, API→Firefly,
+  API→AI-CFO, Firefly→API para la ruta de webhooks y gateway→API/PWA.
+- El primer smoke falló porque Node resolvía Prisma desde `/app`; se corrigió
+  para ejecutar desde `/app/apps/api` y se repitió con éxito.
+- Solo el gateway publica `127.0.0.1:3100`; los demás servicios no publican
+  puertos. Los logs no muestran errores. Se corrigieron formato y cabeceras
+  redundantes de Caddy; las advertencias restantes corresponden a HTTP interno
+  sin TLS porque Tailscale termina HTTPS deliberadamente.
+
+### 5. Verificación final
+
+- `CI=true pnpm install --frozen-lockfile`: correcto.
+- `CI=true pnpm db:generate`: Prisma Client `6.19.3` generado.
+- Primera ejecución de `pnpm verify`: todo salvo formato aprobó; Prettier
+  identificó 12 archivos nuevos. Se formatearon y se repitió la suite completa.
+- `CI=true pnpm verify`: correcto. Svelte 0 errores/0 advertencias; TypeScript
+  correcto; dominio 24/24, web 2/2, API 48/48 y operaciones 18/18; builds
+  web/API y Prettier correctos.
+- `python3 -m pytest services/ai-cfo/tests -q`: 7/7.
+- Compose privado, público y n8n opcional validaron con `config --quiet`. Los
+  secretos n8n de la prueba fueron efímeros; sin secretos, su prueba confirma
+  que el override opcional falla como debe.
+- Búsqueda de patrones de PAT, claves LLM, llaves privadas y tokens: sin
+  coincidencias. `.env` y el llavero permanecen ignorados y con permisos
+  `0600`; no se añadieron secretos ni datos personales.
 
 ## 2026-07-21 — Estabilización funcional y rediseño previo a OKLE
 
@@ -519,3 +656,51 @@ La actualización del servidor se realizará únicamente después de revisión m
 - QA móvil en navegador a 390 × 844: Más, contenido principal y documento miden 390 px, sin desbordamiento horizontal. La navegación inferior muestra Inicio, Movimientos, Bolsillos, Pagos y Más.
 - Se creó correctamente un bolsillo local con nombre y observación libre, sin selector de tipo.
 - Se creó un ingreso esperado y después un acuerdo con dos destinos; el acuerdo se guardó y apareció en la memoria financiera con su primera versión.
+
+## 2026-07-28 — Alta de pareja, saldos coherentes e integraciones configurables
+
+### Hallazgos
+
+- La instalación local solo mostraba login. Crear usuarios y unir a la pareja
+  requería el script técnico de bootstrap.
+- Cuando Firefly no tenía PAT, Inicio mostraba cero como si fuera un saldo
+  bancario confirmado.
+- El gasto de Inicio no filtraba el alcance compartido/privado y el presupuesto
+  dependía del identificador demo `daily`, inexistente en bolsillos reales.
+- TRM y Open Finance tenían configuración de servidor, pero no controles
+  accesibles desde la PWA.
+
+### Implementado
+
+- Alta transaccional del primer hogar desde la PWA. La primera cuenta queda como
+  owner; correo, usuario y contraseña se validan y la contraseña usa el mismo
+  scrypt seguro del login.
+- Invitación de pareja aleatoria, válida 24 horas, de un solo uso y limitada a
+  dos miembros. Solo se guarda el hash del token. Crear otra invalida la
+  anterior.
+- Inicio separa saldo real Firefly y reservas Pocket Engine por alcance, moneda
+  y disponibilidad de la conexión. Sin Firefly muestra `—`, no un cero
+  ficticio.
+- Gasto del mes filtrado por alcance/moneda y presupuesto basado en un bolsillo
+  periódico real. Si no existe, la interfaz muestra `Sin configurar`.
+- Panel **Más → TRM y automatización bancaria**. El owner puede activar la
+  sincronización diaria y actualizar ahora. La SFC sigue siendo fuente primaria
+  y Datos Abiertos el fallback.
+- Open Finance muestra honestamente registro manual o sandbox firmado. Un
+  proveedor bancario real continúa pendiente y no se simula como conectado.
+- Migración aditiva
+  `202607280001_household_invites_integrations` y manual de usuario actualizado.
+
+### Verificación
+
+- `CI=true pnpm db:generate && CI=true pnpm verify`: correcto. Svelte/TypeScript
+  sin errores ni advertencias; 57 pruebas API, 24 de dominio, 2 web y 18
+  operativas aprobadas; builds y formato correctos.
+- `python3 -m pytest services/ai-cfo/tests -q`: 7 aprobadas.
+- Docker: imágenes API/PWA reconstruidas, migración aplicada y siete servicios
+  saludables.
+- QA real en `http://127.0.0.1:3100`: alta inicial, creación/copia de invitación,
+  unión de la pareja, rechazo al segundo uso, login del owner, dos miembros
+  visibles, TRM actualizada desde SFC y guardado de sincronización diaria.
+- El hogar y las cuentas ficticias creadas para QA se eliminaron al terminar;
+  la instalación volvió a quedar vacía para el alta real.

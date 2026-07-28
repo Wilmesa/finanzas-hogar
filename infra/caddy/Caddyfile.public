@@ -1,9 +1,9 @@
 {$APP_ORIGIN} {
-  import /etc/caddy/routes.caddy
+	import /etc/caddy/routes.caddy
 }
 
 http://127.0.0.1 {
-  handle /healthz {
-    respond "ok" 200
-  }
+	handle /healthz {
+		respond "ok" 200
+	}
 }

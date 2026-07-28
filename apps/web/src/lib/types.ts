@@ -28,7 +28,11 @@ export interface TransactionView {
   occurredAt: string;
   pocketId: string;
   currency: string;
+  scope: "household" | "private";
   kind: "expense" | "income" | "allocation";
+  syncStatus?: "queued" | "synchronized" | "failed";
+  reviewStatus?: "PENDING" | "REVIEWED" | "FLAGGED_FOR_PARTNER";
+  origin?: "MANUAL" | "FIREFLY_WEBHOOK" | "OPEN_FINANCE" | "OFFLINE_SYNC";
 }
 
 export interface AccountView {

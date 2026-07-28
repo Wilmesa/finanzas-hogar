@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   NotFoundException,
+  Param,
   Post,
   Req,
   Res,
@@ -19,6 +20,7 @@ import {
   type AuthenticatedRequest,
 } from "./auth.js";
 import { LocalAuthService } from "./local-auth.service.js";
+import { HouseholdAccessService } from "./household-access.service.js";
 import {
   SESSION_COOKIE,
   SessionStore,
@@ -73,7 +75,40 @@ export class AuthController {
   constructor(
     private readonly local: LocalAuthService,
     private readonly sessions: SessionStore,
+    private readonly householdAccess: HouseholdAccessService,
   ) {}
+
+  @Get("setup-status")
+  setupStatus() {
+    if (authMode() !== "local") throw new NotFoundException();
+    return this.householdAccess.setupStatus();
+  }
+
+  @Post("setup")
+  async setup(
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    if (authMode() !== "local") throw new NotFoundException();
+    const result = await this.householdAccess.setup(body);
+    return this.registrationResponse(result, reply);
+  }
+
+  @Get("invitations/:token")
+  invitation(@Param("token") token: string) {
+    if (authMode() !== "local") throw new NotFoundException();
+    return this.householdAccess.invitation(token);
+  }
+
+  @Post("join")
+  async join(
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    if (authMode() !== "local") throw new NotFoundException();
+    const result = await this.householdAccess.join(body);
+    return this.registrationResponse(result, reply);
+  }
 
   @Post("login")
   async login(
@@ -186,5 +221,32 @@ export class AuthController {
     await this.sessions.destroyAll(actor.memberId);
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return { loggedOut: true };
+  }
+
+  private registrationResponse(
+    result: Awaited<ReturnType<HouseholdAccessService["setup"]>>,
+    reply: FastifyReply,
+  ) {
+    const { user, session } = result;
+    reply.setCookie(
+      SESSION_COOKIE,
+      session.token,
+      sessionCookieOptions(session.ttl),
+    );
+    const role = user.member.role === "owner" ? "owner" : "member";
+    return publicUser(
+      {
+        id: user.id,
+        memberId: user.memberId,
+        householdMemberId: user.memberId,
+        householdId: user.member.householdId,
+        displayName: user.member.displayName,
+        email: user.email,
+        role,
+        roles: [role],
+        authProvider: "local",
+      },
+      session.record,
+    );
   }
 }

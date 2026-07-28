@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import type { Actor } from "./auth.js";
+import { ExchangeRatesService } from "./exchange-rates.service.js";
 import { PrismaService } from "./prisma.service.js";
 
 const money = z
@@ -63,7 +65,10 @@ const propertyInput = z.object({
 
 @Injectable()
 export class PatrimonyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly exchangeRates: ExchangeRatesService,
+  ) {}
 
   private visible(actor: Actor) {
     return {
@@ -277,32 +282,88 @@ export class PatrimonyService {
     const parsed = z
       .object({
         recordedAt: dateOnly,
-        currency: z.string().length(3),
-        assets: money,
-        liabilities: money,
+        currency: z
+          .string()
+          .length(3)
+          .transform((value) => value.toUpperCase()),
+        assets: money.optional(),
+        liabilities: money.optional(),
+        components: z
+          .array(
+            z.object({
+              id: z.string().min(1),
+              kind: z.enum(["asset", "liability"]),
+              amount: money,
+              currency: z
+                .string()
+                .length(3)
+                .transform((value) => value.toUpperCase()),
+              source: z.string().min(1).max(120),
+            }),
+          )
+          .optional(),
       })
+      .refine(
+        (value) =>
+          Boolean(value.components?.length) ||
+          (value.assets !== undefined && value.liabilities !== undefined),
+        "Envía activos y pasivos o una lista de componentes",
+      )
       .safeParse(raw);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
-    const assets = new Prisma.Decimal(parsed.data.assets);
-    const liabilities = new Prisma.Decimal(parsed.data.liabilities);
-    return this.prisma.netWorthSnapshot.upsert({
-      where: {
-        householdId_recordedAt_currency: {
+    const rates: Record<string, string> = {
+      [`${parsed.data.currency}/${parsed.data.currency}`]: "1",
+    };
+    let assets = new Prisma.Decimal(parsed.data.assets ?? 0);
+    let liabilities = new Prisma.Decimal(parsed.data.liabilities ?? 0);
+    if (parsed.data.components?.length) {
+      assets = new Prisma.Decimal(0);
+      liabilities = new Prisma.Decimal(0);
+      for (const component of parsed.data.components) {
+        const exchangeRate = await this.exchangeRates.rate(
+          component.currency,
+          parsed.data.currency,
+          parsed.data.recordedAt,
+        );
+        rates[`${component.currency}/${parsed.data.currency}`] =
+          exchangeRate.rate.toString();
+        const converted = new Prisma.Decimal(component.amount).mul(
+          exchangeRate.rate,
+        );
+        if (component.kind === "asset") assets = assets.plus(converted);
+        else liabilities = liabilities.plus(converted);
+      }
+    }
+    try {
+      return await this.prisma.netWorthSnapshot.create({
+        data: {
           householdId: actor.householdId,
           recordedAt: new Date(`${parsed.data.recordedAt}T00:00:00Z`),
-          currency: parsed.data.currency.toUpperCase(),
+          currency: parsed.data.currency,
+          assets,
+          liabilities,
+          netWorth: assets.minus(liabilities),
+          exchangeRates: rates,
+          components: (parsed.data.components ?? {
+            assets: parsed.data.assets,
+            liabilities: parsed.data.liabilities,
+          }) as Prisma.InputJsonValue,
+          source: parsed.data.components?.length
+            ? "calculated_with_exchange_rates"
+            : "manual",
         },
-      },
-      create: {
-        householdId: actor.householdId,
-        recordedAt: new Date(`${parsed.data.recordedAt}T00:00:00Z`),
-        currency: parsed.data.currency.toUpperCase(),
-        assets,
-        liabilities,
-        netWorth: assets.minus(liabilities),
-      },
-      update: { assets, liabilities, netWorth: assets.minus(liabilities) },
-    });
+      });
+    } catch (cause) {
+      if (
+        cause instanceof Prisma.PrismaClientKnownRequestError &&
+        cause.code === "P2002"
+      ) {
+        throw new ConflictException(
+          "Ya existe un snapshot para esa fecha y moneda. Los snapshots históricos son inmutables",
+        );
+      }
+      throw cause;
+    }
   }
 
   private async investment(id: string, actor: Actor) {

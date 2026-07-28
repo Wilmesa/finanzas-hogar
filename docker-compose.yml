@@ -16,6 +16,8 @@ x-app-env: &app-env
   AI_CFO_INTERNAL_TOKEN: ${AI_CFO_INTERNAL_TOKEN:?AI_CFO_INTERNAL_TOKEN es obligatorio}
   VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?VAPID_PUBLIC_KEY es obligatorio}
   VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?VAPID_PRIVATE_KEY es obligatorio}
+  PRIVATE_METADATA_KEYRING_FILE: /run/secrets/okle_private_metadata_keyring
+  PRIVATE_METADATA_ENCRYPTION_KEY: ${PRIVATE_METADATA_ENCRYPTION_KEY:-}
 
 services:
   web:
@@ -69,12 +71,18 @@ services:
       FIREFLY_PRIVATE_TOKEN_MEMBER_A: ${FIREFLY_PRIVATE_TOKEN_MEMBER_A:-}
       FIREFLY_PRIVATE_TOKEN_MEMBER_B: ${FIREFLY_PRIVATE_TOKEN_MEMBER_B:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      TRM_SYNC_ENABLED: ${TRM_SYNC_ENABLED:-false}
+      TRM_PRIMARY_URL: ${TRM_PRIMARY_URL:-https://www.superfinanciera.gov.co/SuperfinancieraWebServiceTRM/TCRMServicesWebService/TCRMServicesWebService}
+      TRM_FALLBACK_URL: ${TRM_FALLBACK_URL:-https://www.datos.gov.co/resource/32sa-8pi3.json}
+      OPEN_FINANCE_MOCK_ENABLED: ${OPEN_FINANCE_MOCK_ENABLED:-false}
+      OPEN_FINANCE_MOCK_SECRET: ${OPEN_FINANCE_MOCK_SECRET:-}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       firefly: { condition: service_healthy }
       ai-cfo: { condition: service_healthy }
     networks: [edge, backend]
+    secrets: [okle_private_metadata_keyring]
     healthcheck:
       test:
         ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/health || exit 1"]
@@ -186,3 +194,7 @@ volumes:
   postgres_data:
   redis_data:
   firefly_upload:
+
+secrets:
+  okle_private_metadata_keyring:
+    file: ${PRIVATE_METADATA_KEYRING_HOST_FILE:-./secrets/private-metadata-keyring.json}

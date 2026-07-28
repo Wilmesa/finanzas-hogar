@@ -1,5 +1,9 @@
 <script lang="ts">
+  import { apiRequest } from "$lib/api";
   import { currency } from "$lib/demo";
+  import { financeData } from "$lib/finance-store";
+  import { isServerMode } from "$lib/auth";
+  import { onMount } from "svelte";
 
   type Simulator = "goal" | "cdt" | "debt" | "investment" | "property";
   let simulator = $state<Simulator>("goal");
@@ -20,6 +24,19 @@
   let downPaymentPercent = $state(30);
   let mortgageRate = $state(12);
   let mortgageYears = $state(15);
+  let scenarioName = $state("");
+  let saved = $state<Array<{
+    id: string;
+    name: string;
+    kind: string;
+    currency: string;
+    status: "draft" | "converted";
+    convertedEntityType?: string;
+    createdAt: string;
+  }>>([]);
+  let saving = $state(false);
+  let message = $state("");
+  let error = $state("");
 
   const goalMonths = $derived(
     Math.max(0, Math.ceil((target - currentSaved) / Math.max(1, contribution))),
@@ -72,6 +89,136 @@
     { id: "investment", icon: "⌁", title: "Inversión", text: "Escenario de crecimiento" },
     { id: "property", icon: "⌂", title: "Vivienda", text: "Cuota inicial y crédito" },
   ];
+
+  onMount(loadSaved);
+
+  async function loadSaved() {
+    if (!isServerMode()) return;
+    try {
+      saved = await apiRequest<typeof saved>("/v1/simulations");
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible cargar escenarios";
+    }
+  }
+
+  function simulationPayload() {
+    const currencyCode = $financeData.settings.baseCurrency;
+    const startDate = new Date().toISOString().slice(0, 10);
+    if (simulator === "goal") return {
+      kind: "savings",
+      assumptions: {
+        currentAmount: String(currentSaved),
+        targetAmount: String(target),
+        contributionAmount: String(contribution),
+        startDate,
+        frequency: "monthly",
+      },
+    };
+    if (simulator === "cdt") return {
+      kind: "cdt",
+      assumptions: {
+        principal: String(principal),
+        effectiveAnnualRate: String(annualRate / 100),
+        days,
+        withholdingRate: "0.04",
+        fees: "0",
+      },
+    };
+    if (simulator === "debt") return {
+      kind: "debt",
+      assumptions: {
+        principal: String(debtBalance),
+        annualRate: String(debtRate / 100),
+        monthlyPayment: String(debtPayment),
+        extraPayment: "0",
+        monthlyFees: "0",
+      },
+    };
+    if (simulator === "investment") return {
+      kind: "investment",
+      assumptions: {
+        initialAmount: String(investmentInitial),
+        monthlyContribution: String(investmentMonthly),
+        annualReturn: String(investmentRate / 100),
+        annualInflation: "0.04",
+        years: investmentYears,
+      },
+    };
+    return {
+      kind: "real_estate",
+      assumptions: {
+        propertyPrice: String(propertyPrice),
+        targetAmount: String(downPayment),
+        downPaymentRate: String(downPaymentPercent / 100),
+        currentSavings: String(currentSaved),
+        monthlySavings: String(contribution),
+        annualMortgageRate: String(mortgageRate / 100),
+        mortgageYears,
+      },
+    };
+  }
+
+  async function saveScenario() {
+    if (!isServerMode()) {
+      error = "Conecta OKLE al servidor para guardar y convertir escenarios.";
+      return;
+    }
+    saving = true;
+    error = "";
+    try {
+      const payload = simulationPayload();
+      await apiRequest("/v1/simulations", {
+        method: "POST",
+        body: JSON.stringify({
+          ...payload,
+          name: scenarioName.trim() || options.find((item) => item.id === simulator)?.title,
+          visibility: "household",
+          currency: $financeData.settings.baseCurrency,
+        }),
+      });
+      scenarioName = "";
+      message = "Escenario guardado con sus supuestos y resultado determinístico.";
+      await loadSaved();
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible guardar";
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function convertScenario(item: (typeof saved)[number]) {
+    const targetType = item.kind === "debt" ? "scheduled_payment" : "pocket";
+    const name = prompt(
+      targetType === "scheduled_payment"
+        ? "Nombre del pago programado"
+        : "Nombre del bolsillo",
+      item.name,
+    );
+    if (!name) return;
+    try {
+      await apiRequest(`/v1/simulations/${item.id}/convert`, {
+        method: "POST",
+        body: JSON.stringify({
+          target: targetType,
+          name,
+          startDate: new Date().toISOString().slice(0, 10),
+          recurrence: "monthly",
+        }),
+      });
+      message =
+        targetType === "scheduled_payment"
+          ? "La proyección ahora es un pago programado y una deuda trazable."
+          : "La proyección ahora es un bolsillo accionable.";
+      await loadSaved();
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No fue posible convertir";
+    }
+  }
+
+  async function archiveScenario(item: (typeof saved)[number]) {
+    await apiRequest(`/v1/simulations/${item.id}`, { method: "DELETE" });
+    await loadSaved();
+  }
 </script>
 
 <div class="page">
@@ -110,5 +257,32 @@
       <div class="result wide"><span>Cuota inicial en {propertySavingMonths} meses</span><strong>{currency(downPayment)}</strong><small>Crédito estimado {currency(mortgagePrincipal)} · cuota base aproximada {currency(mortgagePayment)} al mes.</small></div>
     {/if}
   </section>
+  <section class="panel scenario-actions">
+    <div>
+      <span class="eyebrow">De hipótesis a decisión</span>
+      <h2>Guardar este escenario</h2>
+      <p>El backend recalculará el resultado y conservará los supuestos usados.</p>
+    </div>
+    <label>Nombre del escenario<input bind:value={scenarioName} placeholder="Ej. Salir de tarjeta en 18 meses" /></label>
+    <button class="primary-button" disabled={saving} onclick={saveScenario}>{saving ? "Guardando…" : "Guardar escenario"}</button>
+  </section>
+  {#if message}<p class="success-message" role="status">{message}</p>{/if}
+  {#if error}<p class="form-error" role="alert">{error}</p>{/if}
+  {#if saved.length}
+    <section class="section-block">
+      <header class="section-heading"><div><span class="eyebrow">Historial de decisiones</span><h2>Escenarios guardados</h2></div></header>
+      <div class="payment-grid">
+        {#each saved as item}
+          <article class="panel payment-card">
+            <header><div><span class="privacy">{item.kind}</span><h3>{item.name}</h3><small>{new Date(item.createdAt).toLocaleDateString("es-CO")}</small></div><strong>{item.status === "converted" ? "Convertido" : "Hipótesis"}</strong></header>
+            <div class="row-actions">
+              {#if item.status !== "converted"}<button class="primary-button" onclick={() => convertScenario(item)}>{item.kind === "debt" ? "Crear pago y deuda" : "Crear bolsillo"}</button>{/if}
+              <button class="danger-text" onclick={() => archiveScenario(item)}>Archivar</button>
+            </div>
+          </article>
+        {/each}
+      </div>
+    </section>
+  {/if}
   <p class="educational-note">Todas las proyecciones son educativas y dependen de los supuestos introducidos. No constituyen asesoría ni garantía de rentabilidad.</p>
 </div>

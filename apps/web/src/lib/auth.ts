@@ -81,6 +81,68 @@ export async function loginLocal(
   return user;
 }
 
+export async function localSetupStatus(): Promise<{
+  registrationAvailable: boolean;
+}> {
+  const response = await fetch(`${apiBase()}/v1/auth/setup-status`, {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as { registrationAvailable: boolean };
+}
+
+async function registerLocal(
+  path: "setup" | "join",
+  input: Record<string, string>,
+): Promise<AuthenticatedUser> {
+  const response = await fetch(`${apiBase()}/v1/auth/${path}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw await responseError(response);
+  const user = (await response.json()) as AuthenticatedUser;
+  localCsrfToken = user.csrfToken ?? null;
+  return user;
+}
+
+export function setupLocalHousehold(input: {
+  householdName: string;
+  displayName: string;
+  email: string;
+  username: string;
+  password: string;
+}): Promise<AuthenticatedUser> {
+  return registerLocal("setup", input);
+}
+
+export async function inspectHouseholdInvitation(token: string): Promise<{
+  householdName: string;
+  expiresAt: string;
+}> {
+  const response = await fetch(
+    `${apiBase()}/v1/auth/invitations/${encodeURIComponent(token)}`,
+    { credentials: "same-origin", headers: { Accept: "application/json" } },
+  );
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as {
+    householdName: string;
+    expiresAt: string;
+  };
+}
+
+export function joinLocalHousehold(input: {
+  token: string;
+  displayName: string;
+  email: string;
+  username: string;
+  password: string;
+}): Promise<AuthenticatedUser> {
+  return registerLocal("join", input);
+}
+
 export async function completeLogin(url: URL): Promise<void> {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");

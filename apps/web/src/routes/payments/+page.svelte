@@ -34,8 +34,10 @@
   let notes = $state("");
   let privatePayment = $state(false);
   let payingOccurrence = $state<Occurrence | null>(null);
+  let payingPayment = $state<Payment | null>(null);
   let actualAmount = $state<number | undefined>();
   let sourcePocketId = $state("");
+  let sourceAccountId = $state("");
   const typeLabels: Record<string, string> = {
     service: "Servicio", debt: "Deuda o crédito", rent: "Arriendo",
     tax: "Impuesto", insurance: "Seguro", subscription: "Suscripción", other: "Otro",
@@ -149,19 +151,37 @@
     persistLocal();
   }
 
-  function openPaid(occurrence: Occurrence) {
+  function openPaid(payment: Payment, occurrence: Occurrence) {
+    payingPayment = payment;
     payingOccurrence = occurrence;
     actualAmount = occurrence.plannedAmount;
     sourcePocketId = "";
+    sourceAccountId =
+      $financeData.accounts.find(
+        (account) => account.scope === payment.visibility,
+      )?.id ?? "";
   }
 
   async function markPaid() {
-    if (!payingOccurrence || !actualAmount) return;
+    if (!payingOccurrence || !payingPayment || !actualAmount) return;
+    if (isServerMode() && !sourceAccountId) {
+      error = "Selecciona la cuenta real desde la cual se realizó el pago.";
+      return;
+    }
     const paidOccurrence = payingOccurrence;
     if (isServerMode()) {
       await apiRequest(`/v1/payments/occurrences/${paidOccurrence.id}/paid`, {
         method: "POST",
-        body: JSON.stringify({ actualAmount: String(actualAmount), ...(sourcePocketId ? { sourcePocketId } : {}) }),
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          actualAmount: String(actualAmount),
+          sourceAccountId,
+          fundingSourceScope:
+            $financeData.accounts.find((account) => account.id === sourceAccountId)?.scope ??
+            payingPayment.visibility,
+          ...($financeData.settings.memberId ? { payerMemberId: $financeData.settings.memberId } : {}),
+          ...(sourcePocketId ? { sourcePocketId } : {}),
+        }),
       });
       await load();
     } else {
@@ -179,7 +199,8 @@
       persistLocal();
     }
     payingOccurrence = null;
-    success = "Pago confirmado. El siguiente vencimiento quedó actualizado.";
+    payingPayment = null;
+    success = "Pago registrado en Firefly, conciliado y siguiente vencimiento actualizado.";
   }
 
   function createNextLocalOccurrence(payment: Payment, occurrence: Occurrence): Occurrence | undefined {
@@ -214,7 +235,7 @@
         <header><div><span class="privacy">{payment.visibility === "private" ? "Solo yo" : "Compartido"}</span><h2>{payment.name}</h2><small>{typeLabels[payment.type] ?? payment.type} · {payment.recurrence}</small></div><strong>{currency(payment.estimatedAmount ?? 0, payment.currency)}</strong></header>
         {#if payment.totalAmount}<div class="payment-total"><span>Compromiso total</span><b>{currency(payment.totalAmount, payment.currency)}</b></div>{/if}
         {#each payment.occurrences.filter((item) => item.status !== "paid").slice(0, 2) as occurrence}
-          <div class={`payment-due ${urgency(occurrence.dueDate)}`}><span><small>Próximo vencimiento</small><b>{occurrence.dueDate}</b></span><button onclick={() => openPaid(occurrence)}>Marcar pagado</button></div>
+          <div class={`payment-due ${urgency(occurrence.dueDate)}`}><span><small>Próximo vencimiento</small><b>{occurrence.dueDate}</b></span><button onclick={() => openPaid(payment, occurrence)}>Marcar pagado</button></div>
         {/each}
         <div class="payment-links">{#if payment.paymentUrl}<a href={payment.paymentUrl} target="_blank" rel="noreferrer">Ir a pagar ↗</a>{/if}{#if payment.reference}<button class="reference-copy" onclick={() => copyReference(payment.reference ?? "")}>Copiar ref. {payment.reference}</button>{/if}</div>
         <div class="row-actions"><button onclick={() => addDate(payment)}>＋ Fecha y valor</button><button onclick={() => openForm(payment)}>Editar</button><button class="danger-text" disabled={actionId === payment.id} onclick={() => archive(payment)}>{actionId === payment.id ? "Archivando…" : "Archivar"}</button></div>
@@ -226,4 +247,4 @@
 
 {#if showForm}<div class="modal-backdrop" role="presentation"><div class="quick-entry payment-form" role="dialog" aria-modal="true"><header><div><span class="eyebrow">Calendario flexible</span><h2>{editing ? "Editar pago" : "Nuevo pago"}</h2></div><button class="icon-button" onclick={() => (showForm = false)}>×</button></header><div class="form-grid"><label>Nombre<input bind:value={name} placeholder="Ej. Energía" /></label><label>Tipo<select bind:value={type}><option value="service">Servicio</option><option value="debt">Deuda o crédito</option><option value="rent">Arriendo</option><option value="tax">Impuesto</option><option value="insurance">Seguro</option><option value="subscription">Suscripción</option><option value="other">Otro</option></select></label><label>Valor aproximado<input type="number" min="1" bind:value={amount} /></label><label>Total del compromiso (opcional)<input type="number" min="1" bind:value={totalAmount} /></label><label>Frecuencia<select bind:value={recurrence}><option value="once">Una vez</option><option value="weekly">Semanal</option><option value="biweekly">Quincenal</option><option value="monthly">Mensual</option><option value="quarterly">Trimestral</option><option value="annual">Anual</option><option value="custom">Personalizada</option></select></label><label>Próxima fecha<input type="date" bind:value={nextDueDate} /></label><label>Enlace de pago<input type="url" bind:value={paymentUrl} placeholder="https://…" /></label><label>Referencia<input bind:value={reference} /></label><label class="wide-field">Notas<input bind:value={notes} /></label><label class="switch-row wide-field"><input type="checkbox" bind:checked={privatePayment} /><span>Solo yo</span></label></div>{#if error}<p class="form-error">{error}</p>{/if}<button class="primary-button" disabled={saving} onclick={save}>{saving ? "Guardando…" : "Guardar pago"}</button></div></div>{/if}
 
-{#if payingOccurrence}<div class="modal-backdrop" role="presentation"><div class="quick-entry" role="dialog" aria-modal="true"><header><h2>Confirmar pago</h2><button class="icon-button" onclick={() => (payingOccurrence = null)}>×</button></header><label>Valor real<input type="number" min="1" bind:value={actualAmount} /></label><label>Salió del bolsillo<select bind:value={sourcePocketId}><option value="">Sin conciliar todavía</option>{#each $financeData.pockets as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</select><small>Esto deja trazabilidad de planificación; registra también el movimiento real para conciliar con Firefly.</small></label><button class="primary-button" onclick={markPaid}>Guardar confirmación</button></div></div>{/if}
+  {#if payingOccurrence && payingPayment}<div class="modal-backdrop" role="presentation"><div class="quick-entry" role="dialog" aria-modal="true"><header><h2>Confirmar pago</h2><button class="icon-button" onclick={() => { payingOccurrence = null; payingPayment = null; }}>×</button></header><label>Valor real<input type="number" min="1" bind:value={actualAmount} /></label><label>Cuenta real<select bind:value={sourceAccountId}><option value="">Selecciona una cuenta</option>{#each $financeData.accounts.filter((account) => account.scope === payingPayment?.visibility || (payingPayment?.visibility === "private" && account.scope === "household")) as account}<option value={account.id}>{account.name} · {account.currency} · {account.scope === "household" ? "Hogar" : "Personal"}</option>{/each}</select><small>OKLE creará un único retiro contable en Firefly. Si el pago es privado desde dinero común, el hogar solo verá “Asignación personal”.</small></label><label>Salió del bolsillo<select bind:value={sourcePocketId}><option value="">Sin bolsillo</option>{#each $financeData.pockets.filter((pocket) => pocket.visibility === payingPayment?.visibility && pocket.currency === payingPayment?.currency) as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</select><small>Si eliges un bolsillo también se registrará el evento spent, sin crear transferencias ficticias.</small></label><button class="primary-button" onclick={markPaid}>Registrar pago real</button></div></div>{/if}

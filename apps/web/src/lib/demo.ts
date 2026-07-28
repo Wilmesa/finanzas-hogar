@@ -70,6 +70,7 @@ export const transactions: TransactionView[] = [
     occurredAt: "2026-07-19T15:30:00.000Z",
     pocketId: "daily",
     currency: "COP",
+    scope: "household",
     kind: "expense",
   },
   {
@@ -83,6 +84,7 @@ export const transactions: TransactionView[] = [
     occurredAt: "2026-07-19T12:00:00.000Z",
     pocketId: "daily",
     currency: "COP",
+    scope: "household",
     kind: "expense",
   },
   {
@@ -96,6 +98,7 @@ export const transactions: TransactionView[] = [
     occurredAt: "2026-07-18T14:00:00.000Z",
     pocketId: "home",
     currency: "COP",
+    scope: "household",
     kind: "allocation",
   },
   {
@@ -109,6 +112,7 @@ export const transactions: TransactionView[] = [
     occurredAt: "2026-07-18T10:00:00.000Z",
     pocketId: "daily",
     currency: "COP",
+    scope: "household",
     kind: "expense",
   },
 ];

@@ -5,9 +5,11 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { amortizeDebt } from "@finanzas/domain";
 import { z } from "zod";
 import type { Actor } from "./auth.js";
 import { PrismaService } from "./prisma.service.js";
+import { TransactionsService } from "./transactions.service.js";
 
 const dateOnly = z.iso.date();
 const money = z
@@ -62,6 +64,9 @@ const occurrenceInput = z.object({
 const paidInput = z.object({
   actualAmount: money,
   sourcePocketId: z.string().uuid().optional(),
+  sourceAccountId: z.string().min(1),
+  fundingSourceScope: z.enum(["household", "private"]),
+  payerMemberId: z.string().min(1).optional(),
   note: z.string().trim().max(500).optional(),
 });
 
@@ -93,7 +98,10 @@ function nextRecurringDate(
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly transactions: TransactionsService,
+  ) {}
 
   private visible(actor: Actor) {
     return {
@@ -302,7 +310,15 @@ export class PaymentsService {
     }
   }
 
-  async markPaid(occurrenceId: string, raw: unknown, actor: Actor) {
+  async markPaid(
+    occurrenceId: string,
+    raw: unknown,
+    idempotencyKey: string,
+    actor: Actor,
+  ) {
+    if (!idempotencyKey) {
+      throw new BadRequestException("Idempotency-Key es obligatorio");
+    }
     const parsed = paidInput.safeParse(raw);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     const occurrence = await this.prisma.paymentOccurrence.findUnique({
@@ -327,11 +343,38 @@ export class PaymentsService {
         !pocket ||
         pocket.householdId !== actor.householdId ||
         pocket.currency !== occurrence.paymentPlan.currency ||
+        pocket.visibility !== occurrence.paymentPlan.visibility ||
         (pocket.visibility === "private" &&
           pocket.ownerMemberId !== actor.memberId)
       )
         throw new NotFoundException();
     }
+    const attribution = await this.transactions.create(
+      {
+        type: "withdrawal",
+        amount: parsed.data.actualAmount,
+        currency: occurrence.paymentPlan.currency,
+        description: occurrence.paymentPlan.name,
+        sourceId: parsed.data.sourceAccountId,
+        fundingSourceScope: parsed.data.fundingSourceScope,
+        occurredAt: new Date().toISOString(),
+        payerMemberId: parsed.data.payerMemberId ?? actor.memberId,
+        ...(parsed.data.sourcePocketId
+          ? { pocketId: parsed.data.sourcePocketId }
+          : {}),
+        category:
+          occurrence.paymentPlan.type === "debt"
+            ? "Deudas"
+            : occurrence.paymentPlan.type,
+      },
+      `${idempotencyKey}:transaction`,
+      actor,
+      {
+        origin: "MANUAL",
+        reviewStatus: "REVIEWED",
+        ledgerScope: occurrence.paymentPlan.visibility,
+      },
+    );
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.paymentOccurrence.update({
         where: { id: occurrenceId },
@@ -340,6 +383,7 @@ export class PaymentsService {
           paidAt: new Date(),
           actualAmount: new Prisma.Decimal(parsed.data.actualAmount),
           sourcePocketId: parsed.data.sourcePocketId ?? null,
+          transactionAttributionId: attribution.id,
           note: parsed.data.note ?? null,
         },
       });
@@ -382,6 +426,56 @@ export class PaymentsService {
               : {}),
         },
       });
+      const debt = await tx.debtAccount.findFirst({
+        where: {
+          householdId: actor.householdId,
+          paymentPlanId: occurrence.paymentPlanId,
+          status: "active",
+        },
+      });
+      if (debt) {
+        const schedule = Array.isArray(debt.projectedSchedule)
+          ? (debt.projectedSchedule as Array<{ principal?: string }>)
+          : [];
+        const principalPaid = new Prisma.Decimal(
+          schedule[0]?.principal ?? parsed.data.actualAmount,
+        );
+        const remainingPrincipal = Prisma.Decimal.max(
+          0,
+          debt.principal.minus(principalPaid),
+        );
+        if (remainingPrincipal.isZero()) {
+          await tx.debtAccount.update({
+            where: { id: debt.id },
+            data: {
+              principal: remainingPrincipal,
+              projectedSchedule: [],
+              projectedPayoffDate: new Date(),
+              status: "paid",
+            },
+          });
+        } else {
+          const recalculated = amortizeDebt({
+            principal: remainingPrincipal.toString(),
+            annualRate: debt.annualRate.toString(),
+            monthlyPayment: debt.minimumPayment.toString(),
+            extraPayment: debt.extraPayment.toString(),
+            currency: debt.currency,
+          });
+          const payoffDate = new Date();
+          payoffDate.setUTCMonth(
+            payoffDate.getUTCMonth() + recalculated.months,
+          );
+          await tx.debtAccount.update({
+            where: { id: debt.id },
+            data: {
+              principal: remainingPrincipal,
+              projectedSchedule: recalculated.schedule as Prisma.InputJsonValue,
+              projectedPayoffDate: payoffDate,
+            },
+          });
+        }
+      }
       return updated;
     });
   }

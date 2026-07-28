@@ -13,6 +13,12 @@ def snapshot() -> InsightSnapshot:
         "period": {"start": "2026-07-01", "end": "2026-07-19", "daysRemaining": 12},
         "currency": "COP",
         "metrics": {"income": "8000000", "spent": "4650000", "savingsRate": 0.18, "safeDailySpend": "92000"},
+        "stateBalances": {
+            "REAL": "12000000",
+            "RESERVED": "3500000",
+            "REAL_RESERVED_BALANCE": "8500000",
+            "PROJECTED": "42000000",
+        },
         "evidence": [{"id": "metric:spent", "kind": "metric", "label": "Gasto", "value": "4650000"}],
     })
 

@@ -6,6 +6,9 @@ declare const self: ServiceWorkerGlobalScope;
 
 const STATIC_CACHE = `okle-static-${version}`;
 const PAGE_CACHE = `okle-pages-${version}`;
+const OFFLINE_DATABASE = "okle-offline";
+const OFFLINE_STORE = "mutation-queue";
+const OFFLINE_SYNC_TAG = "okle-financial-mutations";
 const PRECACHE = [...build, ...files].filter(
   (path) =>
     !path.endsWith(".map") &&
@@ -148,4 +151,98 @@ self.addEventListener("notificationclick", (event) => {
         return self.clients.openWindow(target);
       }),
   );
+});
+
+function openOfflineDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(OFFLINE_DATABASE, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(OFFLINE_STORE)) {
+        request.result.createObjectStore(OFFLINE_STORE, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function queuedMutations() {
+  const database = await openOfflineDatabase();
+  return new Promise<
+    Array<{
+      id: string;
+      path: string;
+      body: Record<string, unknown>;
+      csrfToken?: string;
+    }>
+  >((resolve, reject) => {
+    const request = database
+      .transaction(OFFLINE_STORE, "readonly")
+      .objectStore(OFFLINE_STORE)
+      .getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function removeQueuedMutation(id: string) {
+  const database = await openOfflineDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(OFFLINE_STORE, "readwrite");
+    transaction.objectStore(OFFLINE_STORE).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+async function synchronizeMutations() {
+  for (const item of await queuedMutations()) {
+    const response = await fetch(item.path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "Idempotency-Key": item.id,
+        "X-OKLE-Offline-Sync": "true",
+        ...(item.csrfToken ? { "X-CSRF-Token": item.csrfToken } : {}),
+      },
+      body: JSON.stringify(item.body),
+    });
+    if (response.ok) {
+      await removeQueuedMutation(item.id);
+      continue;
+    }
+    if (response.status >= 400 && response.status < 500) {
+      const clients = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      for (const client of clients) {
+        client.postMessage({
+          type: "OKLE_SYNC_REQUIRES_REVIEW",
+          id: item.id,
+          status: response.status,
+        });
+      }
+      continue;
+    }
+    throw new Error(
+      `Sincronización temporalmente no disponible (${response.status})`,
+    );
+  }
+  const clients = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true,
+  });
+  for (const client of clients) {
+    client.postMessage({ type: "OKLE_SYNC_COMPLETE" });
+  }
+}
+
+self.addEventListener("sync", (event) => {
+  const syncEvent = event as ExtendableEvent & { tag: string };
+  if (syncEvent.tag === OFFLINE_SYNC_TAG) {
+    syncEvent.waitUntil(synchronizeMutations());
+  }
 });

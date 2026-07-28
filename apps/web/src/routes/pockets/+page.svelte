@@ -5,6 +5,7 @@
     createPocket,
     financeData,
     setPocketStatus,
+    transferBetweenPockets,
     updatePocket,
   } from "$lib/finance-store";
   import PocketCard from "$lib/PocketCard.svelte";
@@ -24,6 +25,9 @@
   let allocatingPocketId = $state<string | null>(null);
   let allocationAmount = $state<number | undefined>();
   let actionError = $state("");
+  let movingPocketId = $state<string | null>(null);
+  let moveDestinationPocketId = $state("");
+  let moveAmount = $state<number | undefined>();
   let editingPocket = $state<PocketView | null>(null);
   let editName = $state("");
   let editObservations = $state("");
@@ -83,6 +87,35 @@
     actionError = "";
     try { await setPocketStatus(pocket, status); }
     catch (cause) { actionError = cause instanceof Error ? cause.message : "No pudimos actualizar el bolsillo"; }
+  }
+
+  function beginMove(pocket: PocketView) {
+    movingPocketId = pocket.id;
+    moveAmount = undefined;
+    moveDestinationPocketId =
+      pockets.find(
+        (candidate) =>
+          candidate.id !== pocket.id &&
+          candidate.status === "active" &&
+          candidate.currency === pocket.currency &&
+          candidate.visibility === pocket.visibility,
+      )?.id ?? "";
+  }
+
+  async function moveReservation() {
+    if (!movingPocketId || !moveDestinationPocketId || !moveAmount || moveAmount <= 0) return;
+    actionError = "";
+    try {
+      await transferBetweenPockets(
+        movingPocketId,
+        moveDestinationPocketId,
+        moveAmount,
+      );
+      movingPocketId = null;
+      moveAmount = undefined;
+    } catch (cause) {
+      actionError = cause instanceof Error ? cause.message : "No fue posible mover la reserva";
+    }
   }
 
   function beginEdit(pocket: PocketView) {
@@ -182,7 +215,7 @@
     </section>
   {/if}
   {#if actionError}<p class="form-error" role="alert">{actionError}</p>{/if}
-  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} /><div class="pocket-actions"><button onclick={() => (allocatingPocketId = pocket.id)}>Aportar</button><button onclick={() => beginEdit(pocket)}>Editar</button><button onclick={() => changeStatus(pocket, pocket.status === "paused" ? "active" : "paused")}>{pocket.status === "paused" ? "Reanudar" : "Pausar"}</button><button class="danger-text" onclick={() => beginArchive(pocket)}>Archivar</button></div></div>{/each}</div>
+  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} /><div class="pocket-actions"><button onclick={() => (allocatingPocketId = pocket.id)}>Aportar</button><button disabled={pocket.currentAmount <= 0} onclick={() => beginMove(pocket)}>Mover</button><button onclick={() => beginEdit(pocket)}>Editar</button><button onclick={() => changeStatus(pocket, pocket.status === "paused" ? "active" : "paused")}>{pocket.status === "paused" ? "Reanudar" : "Pausar"}</button><button class="danger-text" onclick={() => beginArchive(pocket)}>Archivar</button></div></div>{/each}</div>
   {#if visible.length === 0}<div class="empty-state panel"><strong>No hay bolsillos en esta vista</strong><p>Crea uno compartido o privado para reservar dinero con propósito.</p></div>{/if}
   <button class="fab mobile-only" onclick={() => (creating = !creating)}><span>＋</span> Nuevo</button>
 </div>
@@ -194,6 +227,18 @@
       <label>Cantidad<input type="number" min="1" bind:value={allocationAmount} /></label>
       <p class="privacy-note">Este aporte reserva dinero dentro de la app; no crea una transferencia bancaria.</p>
       <button class="primary-button" onclick={applyAllocation}>Guardar aporte</button>
+    </div>
+  </div>
+{/if}
+
+{#if movingPocketId}
+  <div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && (movingPocketId = null)}>
+    <div class="quick-entry compact" role="dialog" aria-modal="true" aria-labelledby="move-pocket-title">
+      <header><div><span class="eyebrow">Cambio de propósito</span><h2 id="move-pocket-title">Mover reserva</h2></div><button class="icon-button" onclick={() => (movingPocketId = null)} aria-label="Cerrar">×</button></header>
+      <label>Cantidad<input type="number" min="1" max={pockets.find((pocket) => pocket.id === movingPocketId)?.currentAmount} bind:value={moveAmount} /></label>
+      <label>Destino<select bind:value={moveDestinationPocketId}><option value="">Seleccionar…</option>{#each pockets.filter((candidate) => candidate.id !== movingPocketId && candidate.status === "active" && candidate.currency === pockets.find((pocket) => pocket.id === movingPocketId)?.currency && candidate.visibility === pockets.find((pocket) => pocket.id === movingPocketId)?.visibility) as candidate}<option value={candidate.id}>{candidate.name}</option>{/each}</select></label>
+      <p class="privacy-note">Solo cambia el propósito reservado. No crea transferencias ni movimientos en Firefly.</p>
+      <button class="primary-button" onclick={moveReservation}>Mover reserva</button>
     </div>
   </div>
 {/if}

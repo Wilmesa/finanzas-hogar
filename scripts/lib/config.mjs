@@ -21,6 +21,38 @@ export function isValidVapidPrivateKey(value) {
   return /^[A-Za-z0-9_-]{43}$/.test(value ?? "");
 }
 
+export function isValidPrivateMetadataKey(value) {
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(value ?? "")) return false;
+  return Buffer.from(value, "base64").length === 32;
+}
+
+export function isValidPrivateMetadataKeyring(content) {
+  let parsed;
+  try {
+    parsed = typeof content === "string" ? JSON.parse(content) : content;
+  } catch {
+    return false;
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    typeof parsed.activeKeyId !== "string" ||
+    !/^[A-Za-z0-9_-]{1,64}$/.test(parsed.activeKeyId) ||
+    !parsed.keys ||
+    typeof parsed.keys !== "object" ||
+    Array.isArray(parsed.keys)
+  ) {
+    return false;
+  }
+  return (
+    isValidPrivateMetadataKey(parsed.keys[parsed.activeKeyId]) &&
+    Object.entries(parsed.keys).every(
+      ([keyId, value]) =>
+        /^[A-Za-z0-9_-]{1,64}$/.test(keyId) && isValidPrivateMetadataKey(value),
+    )
+  );
+}
+
 export function parseEnv(content) {
   const result = {};
   for (const rawLine of content.split(/\r?\n/)) {

@@ -3,11 +3,27 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 import { resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const root = resolve(import.meta.dirname, "../..");
 const dockerAvailable =
   spawnSync("docker", ["compose", "version"], { encoding: "utf8" }).status ===
-  0;
+    0 ||
+  spawnSync("docker-compose", ["version"], { encoding: "utf8" }).status === 0;
+const ephemeralDirectory = mkdtempSync(resolve(tmpdir(), "okle-compose-test-"));
+const ephemeralKeyring = resolve(ephemeralDirectory, "keyring.json");
+writeFileSync(
+  ephemeralKeyring,
+  JSON.stringify({
+    activeKeyId: "test",
+    keys: { test: randomBytes(32).toString("base64") },
+  }),
+  { mode: 0o600 },
+);
+process.on("exit", () =>
+  rmSync(ephemeralDirectory, { recursive: true, force: true }),
+);
 const baseEnvironment = {
   ...process.env,
   COMPOSE_DISABLE_ENV_FILE: "true",
@@ -18,6 +34,7 @@ const baseEnvironment = {
   AI_CFO_INTERNAL_TOKEN: randomBytes(24).toString("hex"),
   VAPID_PUBLIC_KEY: randomBytes(65).toString("base64url"),
   VAPID_PRIVATE_KEY: randomBytes(32).toString("base64url"),
+  PRIVATE_METADATA_KEYRING_HOST_FILE: ephemeralKeyring,
   KEYCLOAK_ADMIN_PASSWORD: randomBytes(24).toString("hex"),
 };
 delete baseEnvironment.N8N_AUTOMATION_TOKEN;

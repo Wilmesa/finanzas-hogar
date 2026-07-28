@@ -17,7 +17,7 @@ const actor: Actor = {
 
 describe("PaymentsService", () => {
   it("rechaza enlaces de pago no válidos", async () => {
-    const service = new PaymentsService({} as never);
+    const service = new PaymentsService({} as never, {} as never);
     await expect(
       service.create(
         {
@@ -39,7 +39,7 @@ describe("PaymentsService", () => {
         create: vi.fn(async ({ data }) => ({ id: "payment-1", ...data })),
       },
     };
-    const service = new PaymentsService(prisma as never);
+    const service = new PaymentsService(prisma as never, {} as never);
     await service.create(
       {
         name: "Internet",
@@ -76,7 +76,7 @@ describe("PaymentsService", () => {
         update: vi.fn(),
       },
     };
-    const service = new PaymentsService(prisma as never);
+    const service = new PaymentsService(prisma as never, {} as never);
     await expect(service.archive("payment-2", actor)).rejects.toBeInstanceOf(
       NotFoundException,
     );
@@ -111,14 +111,27 @@ describe("PaymentsService", () => {
         })),
       },
       paymentPlan: { update: vi.fn(async () => ({})) },
+      debtAccount: { findFirst: vi.fn(async () => null) },
     };
     const prisma = {
       paymentOccurrence: { findUnique: vi.fn(async () => occurrence) },
       $transaction: vi.fn(async (callback) => callback(transaction)),
     };
-    const service = new PaymentsService(prisma as never);
+    const transactions = {
+      create: vi.fn(async () => ({ id: "attribution-1" })),
+    };
+    const service = new PaymentsService(prisma as never, transactions as never);
 
-    await service.markPaid(occurrence.id, { actualAmount: "118500" }, actor);
+    await service.markPaid(
+      occurrence.id,
+      {
+        actualAmount: "118500",
+        sourceAccountId: "account-1",
+        fundingSourceScope: "household",
+      },
+      "payment-idempotency-1",
+      actor,
+    );
 
     const upsert = transaction.paymentOccurrence.upsert.mock.calls[0]?.[0];
     expect(upsert?.create.dueDate.toISOString().slice(0, 10)).toBe(

@@ -20,7 +20,14 @@ import {
   PatrimonyController,
   PushController,
   ProjectionsController,
+  SimulationsController,
   TransactionsController,
+  ReviewController,
+  SecurityController,
+  TransactionRulesController,
+  IngestionController,
+  ExchangeRatesController,
+  IntegrationsController,
   RemindersController,
 } from "./controllers.js";
 import { FireflyClient } from "./firefly.client.js";
@@ -39,6 +46,14 @@ import { HouseholdService } from "./household.service.js";
 import { CategoriesService } from "./categories.service.js";
 import { PaymentsService } from "./payments.service.js";
 import { PatrimonyService } from "./patrimony.service.js";
+import { ExchangeRatesService } from "./exchange-rates.service.js";
+import { IngestionService } from "./ingestion.service.js";
+import { PrivateMetadataService } from "./private-metadata.service.js";
+import { SimulationsService } from "./simulations.service.js";
+import { TransactionRulesService } from "./transaction-rules.service.js";
+import { MockOpenFinanceAdapter } from "./mock-open-finance.adapter.js";
+import { HouseholdAccessService } from "./household-access.service.js";
+import { IntegrationsService } from "./integrations.service.js";
 
 @Module({
   controllers: [
@@ -50,7 +65,14 @@ import { PatrimonyService } from "./patrimony.service.js";
     AccountsController,
     PlanningController,
     ProjectionsController,
+    SimulationsController,
     TransactionsController,
+    ReviewController,
+    SecurityController,
+    TransactionRulesController,
+    IngestionController,
+    ExchangeRatesController,
+    IntegrationsController,
     CategoriesController,
     AllocationController,
     AiCfoController,
@@ -80,6 +102,14 @@ import { PatrimonyService } from "./patrimony.service.js";
     CategoriesService,
     PaymentsService,
     PatrimonyService,
+    ExchangeRatesService,
+    IngestionService,
+    PrivateMetadataService,
+    SimulationsService,
+    TransactionRulesService,
+    MockOpenFinanceAdapter,
+    HouseholdAccessService,
+    IntegrationsService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

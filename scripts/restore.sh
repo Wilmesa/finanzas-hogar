@@ -24,7 +24,7 @@ backup_target=$(metadata_value DEPLOY_TARGET)
 backup_auth=$(metadata_value AUTH_MODE)
 backup_bundled_n8n=$(metadata_value ENABLE_BUNDLED_N8N)
 backup_commit=$(metadata_value GIT_COMMIT)
-if [ "$backup_format" != "2" ]; then
+if [ "$backup_format" != "2" ] && [ "$backup_format" != "3" ]; then
   echo "Formato de backup incompatible" >&2
   exit 1
 fi
@@ -73,6 +73,13 @@ restore_volume caddy-config.tar.gz "${current_project}_caddy_config"
 if [ "${RESTORE_ENV:-}" = "YES" ]; then
   cp "$backup_dir/env.secrets" .env
   chmod 600 .env
+  if [ "$backup_format" = "3" ]; then
+    keyring_path=$(sed -n 's/^PRIVATE_METADATA_KEYRING_HOST_FILE=//p' .env | tail -n 1)
+    keyring_path=${keyring_path:-secrets/private-metadata-keyring.json}
+    mkdir -p "$(dirname "$keyring_path")"
+    cp "$backup_dir/private-metadata-keyring.json" "$keyring_path"
+    chmod 600 "$keyring_path"
+  fi
   echo ".env restaurado desde el backup porque RESTORE_ENV=YES."
 fi
 if [ -d "$backup_dir/runtime/keycloak" ]; then

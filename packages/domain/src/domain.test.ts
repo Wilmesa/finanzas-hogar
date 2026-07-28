@@ -10,6 +10,9 @@ import {
   planningTimeBucket,
   generateRecurringIncomeDates,
   CreatePocketSchema,
+  matchImportedTransaction,
+  merchantSimilarity,
+  transactionFingerprint,
 } from "./index.js";
 
 describe("Pocket Engine", () => {
@@ -227,5 +230,52 @@ describe("Pocket Engine", () => {
         recurrence: "monthly",
       }),
     ).toEqual(["2027-01-31", "2027-02-28", "2027-03-31", "2027-04-30"]);
+  });
+
+  it("fusiona una transacción bancaria pendiente cuando cambia el descriptor", () => {
+    const result = matchImportedTransaction(
+      {
+        amount: "28900",
+        currency: "COP",
+        occurredAt: "2026-07-27T15:00:00Z",
+        merchant: "RAPPI * RESTAURANTE 4821",
+      },
+      {
+        amount: "28900.00",
+        currency: "COP",
+        occurredAt: "2026-07-25T23:00:00Z",
+        merchant: "Rappi restaurante",
+      },
+    );
+    expect(result.matches).toBe(true);
+    expect(result.dateDistanceDays).toBeLessThanOrEqual(3);
+  });
+
+  it("no fusiona montos diferentes aunque el comercio sea idéntico", () => {
+    expect(
+      matchImportedTransaction(
+        {
+          amount: "10000",
+          currency: "COP",
+          occurredAt: "2026-07-27T00:00:00Z",
+          merchant: "Café Central",
+        },
+        {
+          amount: "12000",
+          currency: "COP",
+          occurredAt: "2026-07-27T00:00:00Z",
+          merchant: "Cafe Central",
+        },
+      ).matches,
+    ).toBe(false);
+    expect(merchantSimilarity("Café Central", "Cafe Central")).toBe(1);
+    expect(
+      transactionFingerprint({
+        amount: "10000",
+        currency: "cop",
+        occurredAt: "2026-07-27T08:00:00Z",
+        merchant: "Café Central",
+      }),
+    ).toContain("10000.00|COP|2026-07-27|cafe central");
   });
 });

@@ -6,7 +6,7 @@ Aplicación self-hosted de finanzas personales y de pareja. Firefly III conserva
 
 El repositorio contiene una **beta experimental funcional y desplegable** de OKLE. `PUBLIC_DATA_MODE=local` permite una demostración sin infraestructura y `server` usa identidades, PostgreSQL y Firefly reales. La autenticación integrada admite `AUTH_MODE=local` (predeterminado privado) o `keycloak` (opcional/público):
 
-- PWA responsive e instalable en SvelteKit con Hoy, Futuro, Patrimonio, Copiloto y Movimientos; Cuentas, Bolsillos, Hogar y Configuración son secciones secundarias.
+- PWA responsive e instalable en SvelteKit con Inicio, Movimientos, Bolsillos, Pagos y Más; Plan financiero, Patrimonio, Simuladores, Asesor, Cuentas y Hogar se abren desde Más.
 - Service worker con caché de interfaz y navegación visitada; API financiera y autenticación siempre quedan fuera de caché.
 - API NestJS/Fastify con identidad normalizada, sesiones locales opacas en Redis u OIDC/PKCE opcional.
 - PostgreSQL/Prisma con hogares, miembros, bolsillos, eventos, reglas, atribuciones, check-ins e insights.
@@ -64,13 +64,17 @@ node scripts/init-env.mjs
 # editar .env
 node scripts/preflight.mjs
 DEPLOY_TARGET=private scripts/deploy.sh
-scripts/bootstrap-local-users.sh
 ```
 
-La instalación inicial sin PAT usa explícitamente `--bootstrap`. Consulte la guía completa antes de ejecutarla:
+Al abrir por primera vez la PWA, la persona propietaria crea el hogar y su
+contraseña en una sola pantalla. Después genera desde **Hogar y perfiles** un
+enlace de invitación de un solo uso para su pareja. El script histórico de
+bootstrap permanece únicamente para recuperación administrativa. Consulte la
+guía completa antes de introducir datos reales:
 
 - [Despliegue privado con Tailscale](docs/DEPLOY_PRIVATE_TAILSCALE.md)
 - [Migración general](docs/MIGRATION.md)
+- [Flujos e interconexiones](docs/INTERCONNECTIONS.md)
 
 ### Instalar y actualizar desde Git
 
@@ -122,11 +126,18 @@ python3 -m pytest services/ai-cfo/tests -q
 - `POST /v1/pockets/:id/allocate`: registra un evento virtual idempotente.
 - `GET/POST/PATCH/DELETE /v1/accounts`: administra cuentas Firefly por alcance sin exponer PAT al cliente.
 - `GET/PATCH /v1/household` y `PATCH /v1/profile`: hogar, miembros e identidad visible.
+- `GET /v1/auth/setup-status` y `POST /v1/auth/setup`: alta única del primer hogar.
+- `POST /v1/household/invitations`, `GET /v1/auth/invitations/:token` y `POST /v1/auth/join`: invitación de pareja de un solo uso.
+- `GET/PATCH /v1/integrations` y `POST /v1/integrations/trm/refresh`: preferencias del hogar, TRM y modo Open Finance.
 - `GET /v1/onboarding/status`: diagnóstico seguro de la configuración inicial.
 - `GET/POST/PATCH /v1/planning/*`: fuentes, ingresos esperados, planes, asignaciones e historia de decisiones.
 - `GET/POST/PATCH/DELETE /v1/payments`: pagos, vencimientos, enlaces, referencias y confirmación del bolsillo de origen.
 - `GET/POST/PATCH /v1/patrimony/*`: CDTs, inversiones, inmuebles y cortes históricos del patrimonio.
 - `POST /v1/transactions`: registra en el libro Firefly correcto y guarda su atribución.
+- `POST /v1/ingestion/mock-sandbox`: inyecta lotes Open Finance de prueba
+  firmados para validar `pending → posted` e idempotencia sin un banco real.
+- `POST /v1/security/private-metadata/rotate`: recifra de forma idempotente los
+  metadatos privados del miembro con la llave activa.
 - `POST /v1/projections/*`: ahorro, CDT, deuda, inversión e inmuebles sin modificar Firefly.
 - `GET/POST /v1/insights`: consulta o genera un snapshot permitido, valida y persiste el análisis.
 - `GET /v1/ai-cfo/status`: proveedor, modelo y disponibilidad, nunca la API key.
@@ -173,13 +184,20 @@ Use `deterministic` únicamente para pruebas. La PWA recibe proveedor, modelo y 
 
 ## Límites conocidos de la beta
 
-- El stack Docker no pudo ejecutarse en esta estación porque Docker no está instalado; debe pasar preflight y pruebas E2E en el servidor antes de usar datos reales.
-- La estructura privada/pública se valida en CI mediante `docker compose config` y build de las imágenes propias, pero los contenedores integrados deben superar healthchecks en Ubuntu antes de datos reales.
-- La inspección visual automatizada y el comportamiento offline se registran en `BITACORA.md`; el stack completo aún debe probarse en una máquina con Docker.
+- El 28 de julio de 2026 el stack local completo superó builds, migraciones,
+  healthchecks y conectividad interna entre gateway, PWA, API, PostgreSQL,
+  Redis, Firefly y AI-CFO. Aun debe repetirse en el servidor destino antes de
+  introducir datos reales.
+- La inspección visual automatizada y el comportamiento offline se registran
+  en `BITACORA.md`; Web Push todavía requiere prueba en los móviles reales.
 - Web Push requiere instalar la PWA, conceder permiso en cada dispositivo y completar una prueba real de entrega en el servidor. En iOS se necesita una PWA añadida a la pantalla de inicio.
 - La ingesta registra explícitamente cuando BanRep bloquea robots o no entrega RSS válido; las fuentes agregadas de respaldo evitan que esa caída deje el módulo vacío.
 - OKLE intenta consultar el portal oficial de BanRep y, como respaldo operativo sin clave, agrega cobertura de Google News para economía colombiana, regional y mundial conservando el enlace original de cada publicación. `NEWS_REGION_QUERY` personaliza la región y `NEWS_RSS_FEEDS` permite añadir feeds HTTPS propios. Alpha Vantage aporta contexto global adicional cuando se configura su clave. Las fuentes que bloquean robots o dejan de entregar RSS aparecen como fallidas, sin ocultar el error ni bloquear la aplicación.
 - La operación privada financiada desde el libro común deja atribuciones `pending/failed/synchronized` y un asiento redactado; aún se recomienda un worker outbox dedicado antes de escala comercial.
+- El adaptador Open Finance incluido es un sandbox firmado y reproducible. Un
+  proveedor real requiere credenciales, consentimiento y validación de su firma.
+- El llavero versionado es un KMS local simulado; para SaaS debe sustituirse por
+  un KMS/HSM/Vault externo con material no exportable.
 - Falta imponer RLS con un rol PostgreSQL de runtime separado y ampliar la prueba E2E de cuentas contra un Firefly efímero con PAT automatizado.
 - Redis/BullMQ, OpenTelemetry y los dashboards de observabilidad están previstos, pero no se activan todavía en código.
 
