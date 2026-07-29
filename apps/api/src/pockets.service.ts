@@ -34,6 +34,9 @@ export class PocketsService {
       },
       orderBy: [{ visibility: "asc" }, { createdAt: "desc" }],
       include: {
+        owner: {
+          select: { id: true, displayName: true, color: true },
+        },
         fundingLots: {
           where: { remainingAmount: { gt: 0 } },
           select: {
@@ -53,6 +56,7 @@ export class PocketsService {
     });
     return pockets.map((pocket) => ({
       ...pocket,
+      canManage: pocket.ownerMemberId === actor.memberId,
       unreconciledAmount: pocket.fundingLots
         .filter((lot) => !lot.sourceAccountId)
         .reduce(
@@ -67,6 +71,12 @@ export class PocketsService {
     const pocket = await this.prisma.pocket.findUnique({ where: { id } });
     if (!pocket || !canReadPocket(pocket, actor)) throw new NotFoundException();
     return pocket;
+  }
+
+  private assertOwner(pocket: { ownerMemberId: string }, actor: Actor): void {
+    if (pocket.ownerMemberId !== actor.memberId) {
+      throw new NotFoundException();
+    }
   }
 
   private parseCreate(raw: unknown) {
@@ -143,9 +153,7 @@ export class PocketsService {
 
   async update(id: string, raw: unknown, actor: Actor) {
     const pocket = await this.find(id, actor);
-    if (pocket.ownerMemberId !== actor.memberId && actor.role !== "owner") {
-      throw new NotFoundException();
-    }
+    this.assertOwner(pocket, actor);
     const result = UpdatePocketSchema.safeParse(raw);
     if (!result.success) {
       throw new BadRequestException({
@@ -195,9 +203,7 @@ export class PocketsService {
     actor: Actor,
   ) {
     const pocket = await this.find(id, actor);
-    if (pocket.ownerMemberId !== actor.memberId && actor.role !== "owner") {
-      throw new NotFoundException();
-    }
+    this.assertOwner(pocket, actor);
     const hasBalance = !pocket.currentAmount.isZero();
     if (hasBalance && !idempotencyKey) {
       throw new BadRequestException(
@@ -218,6 +224,7 @@ export class PocketsService {
         throw new BadRequestException("Selecciona otro bolsillo de destino");
       }
       destination = await this.find(raw.destinationPocketId, actor);
+      this.assertOwner(destination, actor);
       if (
         destination.status !== "active" ||
         destination.currency !== pocket.currency ||
@@ -360,6 +367,7 @@ export class PocketsService {
     if (!amount.isPositive())
       throw new ConflictException("El aporte debe ser mayor que cero");
     const pocket = await this.find(id, actor);
+    this.assertOwner(pocket, actor);
     const mode = raw.mode ?? "account";
     const reason = raw.reason?.trim();
     let sourceAccountId: string | null = null;
@@ -373,6 +381,12 @@ export class PocketsService {
       const availability = await this.accounts.availableForAllocation(
         raw.sourceAccountId,
         raw.sourceLedgerScope,
+        actor,
+      );
+      await this.accounts.assertOwnedAccount(
+        raw.sourceAccountId,
+        raw.sourceLedgerScope,
+        pocket.ownerMemberId,
         actor,
       );
       if (availability.account.currency !== pocket.currency) {
@@ -494,12 +508,19 @@ export class PocketsService {
       );
     }
     const pocket = await this.find(id, actor);
+    this.assertOwner(pocket, actor);
     if (amount.greaterThan(pocket.currentAmount)) {
       throw new BadRequestException("El bolsillo no tiene saldo suficiente");
     }
     await this.accounts.assertAccount(
       raw.targetAccountId,
       raw.targetLedgerScope,
+      actor,
+    );
+    await this.accounts.assertOwnedAccount(
+      raw.targetAccountId,
+      raw.targetLedgerScope,
+      pocket.ownerMemberId,
       actor,
     );
     const targetAccountId = raw.targetAccountId;
@@ -596,6 +617,8 @@ export class PocketsService {
       this.find(sourceId, actor),
       this.find(raw.destinationPocketId, actor),
     ]);
+    this.assertOwner(source, actor);
+    this.assertOwner(destination, actor);
     if (
       source.currency !== destination.currency ||
       source.visibility !== destination.visibility ||
@@ -738,5 +761,177 @@ export class PocketsService {
       });
       remaining = remaining.minus(moved);
     }
+  }
+
+  async linkAccount(
+    id: string,
+    raw: {
+      accountId?: string;
+      ledgerScope?: LedgerScope;
+      version?: number;
+    },
+    actor: Actor,
+  ) {
+    const pocket = await this.find(id, actor);
+    this.assertOwner(pocket, actor);
+    if (!raw.accountId || !raw.ledgerScope) {
+      throw new BadRequestException("Selecciona una cuenta para el bolsillo");
+    }
+    if (!Number.isInteger(raw.version) || Number(raw.version) < 1) {
+      throw new BadRequestException(
+        "Actualiza el bolsillo e inténtalo de nuevo",
+      );
+    }
+    const accountId = raw.accountId;
+    const ledgerScope = raw.ledgerScope;
+    const version = raw.version as number;
+    const availability = await this.accounts.availableForAllocation(
+      accountId,
+      ledgerScope,
+      actor,
+    );
+    await this.accounts.assertOwnedAccount(
+      accountId,
+      ledgerScope,
+      pocket.ownerMemberId,
+      actor,
+    );
+    if (availability.account.currency !== pocket.currency) {
+      throw new BadRequestException(
+        "La cuenta y el bolsillo deben usar la misma moneda",
+      );
+    }
+    const unreconciled = await this.prisma.pocketFundingLot.aggregate({
+      where: {
+        pocketId: pocket.id,
+        sourceAccountId: null,
+        remainingAmount: { gt: 0 },
+      },
+      _sum: { remainingAmount: true },
+    });
+    const amount = unreconciled._sum.remainingAmount ?? new Prisma.Decimal(0);
+    if (amount.greaterThan(availability.availableAmount)) {
+      throw new BadRequestException(
+        `La cuenta no tiene disponibilidad suficiente para respaldar ${amount.toString()} ${pocket.currency}`,
+      );
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.pocket.updateMany({
+        where: { id: pocket.id, version },
+        data: {
+          defaultAccountId: accountId,
+          defaultLedgerScope: ledgerScope,
+          version: { increment: 1 },
+        },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException(
+          "El bolsillo cambió en otro dispositivo. Actualiza e inténtalo de nuevo",
+        );
+      }
+      if (amount.greaterThan(0)) {
+        await tx.pocketFundingLot.updateMany({
+          where: {
+            pocketId: pocket.id,
+            sourceAccountId: null,
+            remainingAmount: { gt: 0 },
+          },
+          data: {
+            sourceAccountId: accountId,
+            sourceLedgerScope: ledgerScope,
+            origin: "legacy_reconciliation",
+            reason: "Saldo legado vinculado por el creador del bolsillo",
+          },
+        });
+      }
+      const linked = await tx.pocket.findUniqueOrThrow({
+        where: { id: pocket.id },
+      });
+      await tx.auditLog.create({
+        data: {
+          householdId: actor.householdId,
+          actorMemberId: actor.memberId,
+          entityType: "Pocket",
+          entityId: pocket.id,
+          action: "account_linked",
+          before: JSON.parse(JSON.stringify(pocket)) as Prisma.InputJsonValue,
+          after: JSON.parse(JSON.stringify(linked)) as Prisma.InputJsonValue,
+        },
+      });
+      return linked;
+    });
+  }
+
+  async deleteCreatedByMistake(
+    id: string,
+    raw: { confirmation?: string; reason?: string },
+    actor: Actor,
+  ) {
+    const pocket = await this.find(id, actor);
+    this.assertOwner(pocket, actor);
+    if (raw.confirmation !== "ELIMINAR") {
+      throw new BadRequestException(
+        "Escribe ELIMINAR para confirmar la eliminación definitiva",
+      );
+    }
+    const reason = raw.reason?.trim();
+    if (!reason || reason.length < 5 || reason.length > 500) {
+      throw new BadRequestException(
+        "Explica brevemente por qué el bolsillo fue creado por error",
+      );
+    }
+    const [
+      transactions,
+      planAllocations,
+      paymentOccurrences,
+      investments,
+      realEvents,
+    ] = await Promise.all([
+      this.prisma.transactionAttribution.count({
+        where: { pocketId: pocket.id },
+      }),
+      this.prisma.planFundingAllocation.count({
+        where: { pocketId: pocket.id },
+      }),
+      this.prisma.paymentOccurrence.count({
+        where: { sourcePocketId: pocket.id },
+      }),
+      this.prisma.investmentPosition.count({
+        where: { pocketId: pocket.id },
+      }),
+      this.prisma.pocketEvent.count({
+        where: { pocketId: pocket.id, planningOnly: false },
+      }),
+    ]);
+    if (
+      transactions +
+        planAllocations +
+        paymentOccurrences +
+        investments +
+        realEvents >
+      0
+    ) {
+      throw new BadRequestException(
+        "Este bolsillo ya tiene movimientos o planes reales. Debes archivarlo para conservar la trazabilidad",
+      );
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.auditLog.create({
+        data: {
+          householdId: actor.householdId,
+          actorMemberId: actor.memberId,
+          entityType: "Pocket",
+          entityId: pocket.id,
+          action: "deleted_as_mistake",
+          before: {
+            ...JSON.parse(JSON.stringify(pocket)),
+            deletionReason: reason,
+          } as Prisma.InputJsonValue,
+          after: { deleted: true, deletionReason: reason },
+        },
+      });
+      await tx.pocket.delete({ where: { id: pocket.id } });
+    });
+    return { deleted: true, id: pocket.id };
   }
 }

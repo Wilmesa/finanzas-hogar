@@ -90,6 +90,11 @@ export class HouseholdController {
     );
   }
 
+  @Patch("profile/ui-preferences")
+  updateUiPreferences(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.households.updateUiPreferences(actor, body);
+  }
+
   @Get("onboarding/status")
   onboarding(@CurrentActor() actor: Actor) {
     return this.households.onboarding(actor);
@@ -202,6 +207,29 @@ export class PocketsController {
     @CurrentActor() actor: Actor,
   ) {
     return this.pockets.transfer(id, body, key ?? "", actor);
+  }
+
+  @Put(":id/account")
+  linkAccount(
+    @Param("id") id: string,
+    @Body()
+    body: {
+      accountId?: string;
+      ledgerScope?: "household" | "private";
+      version?: number;
+    },
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.pockets.linkAccount(id, body, actor);
+  }
+
+  @Post(":id/delete-mistake")
+  deleteCreatedByMistake(
+    @Param("id") id: string,
+    @Body() body: { confirmation?: string; reason?: string },
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.pockets.deleteCreatedByMistake(id, body, actor);
   }
 }
 
@@ -397,6 +425,7 @@ export class AccountsController {
       openingBalance?: string;
       openingBalanceDate?: string;
       ownerMemberId?: string | null;
+      isPrimary?: boolean;
       icon?: string;
       color?: string;
     },
@@ -416,6 +445,7 @@ export class AccountsController {
         ...(body.ownerMemberId !== undefined
           ? { ownerMemberId: body.ownerMemberId }
           : {}),
+        ...(body.isPrimary !== undefined ? { isPrimary: body.isPrimary } : {}),
         ...(body.icon !== undefined ? { icon: body.icon } : {}),
         ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.openingBalance !== undefined
@@ -438,6 +468,7 @@ export class AccountsController {
       name?: string;
       currency?: string;
       ownerMemberId?: string | null;
+      isPrimary?: boolean;
       icon?: string;
       color?: string;
     },

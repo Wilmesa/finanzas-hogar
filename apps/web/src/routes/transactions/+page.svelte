@@ -33,6 +33,13 @@
     page.url.searchParams.get("mode") === "corrections",
   );
   const pockets = $derived($financeData.pockets);
+  const selectableAccounts = $derived(
+    movementKind === "expense"
+      ? $financeData.accounts.filter(
+          (account) => account.scope === "household" && account.isPrimary,
+        )
+      : $financeData.accounts,
+  );
   const destinationAccounts = $derived(
     $financeData.accounts.filter((account) => {
       const source = $financeData.accounts.find((item) => item.id === accountId);
@@ -83,6 +90,11 @@
     }
     return [...totals.entries()].sort((left, right) => right[1] - left[1]);
   });
+  const totalPeriodSpend = $derived(
+    spendByCategory.reduce((sum, [, total]) => sum + total, 0),
+  );
+  const largestCategorySpend = $derived(spendByCategory[0]?.[1] ?? 0);
+  const largestPayerSpend = $derived(spendByPayer[0]?.[1] ?? 0);
 
   onMount(() => {
     const action = page.url.searchParams.get("action");
@@ -118,9 +130,9 @@
       return;
     }
     try {
-      const selectedAccountId = $financeData.accounts.some((account) => account.id === accountId)
+      const selectedAccountId = selectableAccounts.some((account) => account.id === accountId)
         ? accountId
-        : $financeData.accounts[0]?.id;
+        : selectableAccounts[0]?.id;
       if (!selectedAccountId) throw new Error("Selecciona una cuenta");
       await createTransaction({
         amount,
@@ -185,11 +197,19 @@
   <header class="page-header"><div><span class="eyebrow">{correctionsMode ? "Ventana de siete días" : "Todo conciliado"}</span><h1>{correctionsMode ? "Correcciones" : "Movimientos"}</h1><p>{correctionsMode ? "Revisa y corrige descripción, categoría o naturaleza sin alterar el asiento bancario original." : "Ingresos, gastos y transferencias con cuenta de origen y destino."}</p></div>{#if !correctionsMode}<button class="primary-button" onclick={() => (registering = !registering)}>＋ Registrar</button>{/if}</header>
   {#if registering}
     <section class="panel inline-entry">
-      <div class="form-grid"><label>Tipo<select bind:value={movementKind}><option value="expense">Gasto</option><option value="income">Ingreso recibido</option><option value="transfer">Transferencia entre cuentas</option></select></label><label>Cantidad<input type="number" min="1" bind:value={amount} /></label><label>{movementKind === "income" ? "Cuenta que recibe" : "Cuenta de origen"}<select bind:value={accountId}><option value="">Seleccionar…</option>{#each $financeData.accounts as account}<option value={account.id}>{account.icon} {account.name} · {currency(account.availableBalance, account.currency)} disponible</option>{/each}</select>{#if !$financeData.accounts.length}<small>Crea una cuenta desde <a href="/accounts">Cuentas</a>.</small>{/if}</label>{#if movementKind === "transfer"}<label>Cuenta que recibe<select bind:value={destinationAccountId}><option value="">Seleccionar…</option>{#each destinationAccounts as account}<option value={account.id}>{account.icon} {account.name} · {account.ownerName}</option>{/each}</select><small>Debe pertenecer al mismo libro y usar la misma moneda.</small></label>{/if}<label>Descripción<input bind:value={merchant} placeholder={movementKind === "transfer" ? "Ej. transferencia a mi pareja" : ""} /></label><label>Categoría<select bind:value={category}>{#each $financeData.categories as item}<option value={item.name}>{item.icon} {item.name}</option>{/each}</select></label><label>Responsable<select bind:value={payerMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label>{#if movementKind === "expense"}<label>Este gasto es<select bind:value={spendingNature}><option value="household">Familiar</option><option value="personal">Personal</option></select></label>{/if}</div>
+      <div class="form-grid"><label>Tipo<select bind:value={movementKind}><option value="expense">Gasto</option><option value="income">Ingreso recibido</option><option value="transfer">Transferencia entre cuentas</option></select></label><label>Cantidad<input type="number" min="1" bind:value={amount} /></label><label>{movementKind === "income" ? "Cuenta que recibe" : "Cuenta de origen"}<select bind:value={accountId}><option value="">Seleccionar…</option>{#each selectableAccounts as account}<option value={account.id}>{account.icon} {account.name} · {account.ownerName} · {currency(account.availableBalance, account.currency)} disponible</option>{/each}</select>{#if !selectableAccounts.length}<small>{movementKind === "expense" ? "Marca al menos una cuenta compartida como principal en " : "Crea una cuenta desde "}<a href="/accounts">Cuentas</a>.</small>{/if}</label>{#if movementKind === "transfer"}<label>Cuenta que recibe<select bind:value={destinationAccountId}><option value="">Seleccionar…</option>{#each destinationAccounts as account}<option value={account.id}>{account.icon} {account.name} · {account.ownerName}</option>{/each}</select><small>Debe pertenecer al mismo libro y usar la misma moneda.</small></label>{/if}<label>Descripción<input bind:value={merchant} placeholder={movementKind === "transfer" ? "Ej. transferencia a mi pareja" : ""} /></label><label>Categoría<select bind:value={category}>{#each $financeData.categories as item}<option value={item.name}>{item.icon} {item.name}</option>{/each}</select></label><label>Responsable<select bind:value={payerMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label>{#if movementKind === "expense"}<label>Este gasto es<select bind:value={spendingNature}><option value="household">Familiar</option><option value="personal">Personal</option></select></label>{/if}</div>
       {#if error}<p class="form-error">{error}</p>{/if}<button class="primary-button" onclick={save}>Guardar {movementKind === "expense" ? "gasto" : movementKind === "income" ? "ingreso" : "transferencia"}</button>
     </section>
   {/if}
-  <section class="source-analysis panel"><div><span class="eyebrow">Análisis del periodo</span><h2>Quién gastó y en qué</h2><p>El periodo comienza en la última nómina detectada; puedes cambiar las fechas.</p></div><div class="analysis-pairs"><div class="source-bars"><strong>Por categoría</strong>{#each spendByCategory.slice(0,4) as [label, total]}<div><span>{label}</span><b>{currency(total)}</b></div>{/each}</div><div class="source-bars"><strong>Por persona</strong>{#each spendByPayer.slice(0,4) as [label, total]}<div><span>{label}</span><b>{currency(total)}</b></div>{/each}</div></div></section>
+  <section class="source-analysis panel">
+    <div class="analysis-heading"><div><span class="eyebrow">Análisis del periodo</span><h2>Quién gastó y en qué</h2><p>Las gráficas respetan los filtros y fechas seleccionados.</p></div><strong>{currency(totalPeriodSpend)}</strong></div>
+    {#if totalPeriodSpend > 0}
+      <div class="analysis-pairs">
+        <div class="source-bars"><strong>Por categoría</strong>{#each spendByCategory.slice(0,5) as [label, total]}<div class="analysis-bar"><span><b>{label}</b><small>{currency(total)}</small></span><div aria-label={`${label}: ${Math.round((total / totalPeriodSpend) * 100)} % del gasto`}><i style={`width:${Math.max(4, (total / largestCategorySpend) * 100)}%`}></i></div></div>{/each}</div>
+        <div class="source-bars"><strong>Por persona</strong>{#each spendByPayer.slice(0,5) as [label, total]}<div class="analysis-bar member-bar"><span><b>{label}</b><small>{currency(total)}</small></span><div aria-label={`${label}: ${Math.round((total / totalPeriodSpend) * 100)} % del gasto`}><i style={`width:${Math.max(4, (total / largestPayerSpend) * 100)}%`}></i></div></div>{/each}</div>
+      </div>
+    {:else}<p class="empty-inline">No hay gastos para representar con los filtros actuales.</p>{/if}
+  </section>
   <section class="panel transaction-panel">
     <div class="filter-bar advanced"><input aria-label="Buscar movimientos" placeholder="Buscar comercio o categoría" bind:value={search} /><select aria-label="Filtrar bolsillo" bind:value={pocketFilter}><option value="all">Todos los bolsillos</option>{#each pockets as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</select><select aria-label="Filtrar persona" bind:value={payerFilter}><option value="all">Todas las personas</option>{#each $financeData.members as member}<option value={member.displayName}>{member.displayName}</option>{/each}</select><select aria-label="Filtrar categoría" bind:value={categoryFilter}><option value="all">Todas las categorías</option>{#each $financeData.categories as item}<option value={item.name}>{item.name}</option>{/each}</select><label>Desde<input type="date" bind:value={dateFrom} /></label><label>Hasta<input type="date" bind:value={dateTo} /></label></div>
     <div class="transaction-list detailed">

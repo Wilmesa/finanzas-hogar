@@ -14,6 +14,27 @@ const initial = browser
 export const themePreference = writable<ThemePreference>(initial);
 export const resolvedTheme = writable<"light" | "dark">("light");
 
+function readableText(hex: string): "#FFFFFF" | "#102033" {
+  const value = hex.replace("#", "");
+  const red = Number.parseInt(value.slice(0, 2), 16);
+  const green = Number.parseInt(value.slice(2, 4), 16);
+  const blue = Number.parseInt(value.slice(4, 6), 16);
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+  return luminance > 0.6 ? "#102033" : "#FFFFFF";
+}
+
+export function applyInterfaceColors(
+  primaryColor: string,
+  accentColor: string,
+): void {
+  if (!browser) return;
+  const root = document.documentElement;
+  root.style.setProperty("--user-primary", primaryColor);
+  root.style.setProperty("--user-on-primary", readableText(primaryColor));
+  root.style.setProperty("--user-accent", accentColor);
+  root.style.setProperty("--user-on-accent", readableText(accentColor));
+}
+
 export function applyTheme(preference: ThemePreference): void {
   if (!browser) return;
   const dark =

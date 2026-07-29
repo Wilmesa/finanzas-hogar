@@ -3,11 +3,41 @@ import {
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type { Actor } from "./auth.js";
 import { FireflyClient } from "./firefly.client.js";
 import { PrismaService } from "./prisma.service.js";
 
 const COLOR = /^#[0-9A-F]{6}$/i;
+const DASHBOARD_SECTIONS = [
+  "accounts",
+  "pocketTotals",
+  "recentTransactions",
+  "dailyBudget",
+  "advisor",
+  "nextIncome",
+] as const;
+
+type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
+
+interface UiPreferences {
+  primaryColor: string;
+  accentColor: string;
+  dashboard: Record<DashboardSection, boolean>;
+}
+
+const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  primaryColor: "#123C69",
+  accentColor: "#B9862E",
+  dashboard: {
+    accounts: true,
+    pocketTotals: true,
+    recentTransactions: true,
+    dailyBudget: true,
+    advisor: true,
+    nextIncome: true,
+  },
+};
 
 @Injectable()
 export class HouseholdService {
@@ -28,12 +58,16 @@ export class HouseholdService {
             role: true,
             avatar: true,
             color: true,
+            uiPreferences: true,
             localUser: { select: { username: true } },
           },
           orderBy: [{ role: "asc" }, { displayName: "asc" }],
         },
       },
     });
+    const currentMember = household.members.find(
+      (member) => member.id === actor.memberId,
+    );
     return {
       id: household.id,
       name: household.name,
@@ -42,6 +76,7 @@ export class HouseholdService {
       onboardingCompletedAt: household.onboardingCompletedAt,
       currentMemberId: actor.memberId,
       currentRole: actor.role,
+      uiPreferences: this.normalizeUiPreferences(currentMember?.uiPreferences),
       members: household.members.map((member) => ({
         id: member.id,
         displayName: member.displayName,
@@ -51,6 +86,111 @@ export class HouseholdService {
         avatar: member.avatar,
         color: member.color,
       })),
+    };
+  }
+
+  async updateUiPreferences(actor: Actor, raw: unknown) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new BadRequestException("Las preferencias no son válidas");
+    }
+    const input = raw as {
+      primaryColor?: unknown;
+      accentColor?: unknown;
+      dashboard?: unknown;
+    };
+    const current = await this.prisma.member.findUniqueOrThrow({
+      where: { id: actor.memberId },
+      select: { uiPreferences: true },
+    });
+    const preferences = this.normalizeUiPreferences(current.uiPreferences);
+    if (
+      input.primaryColor !== undefined &&
+      (typeof input.primaryColor !== "string" ||
+        !COLOR.test(input.primaryColor))
+    ) {
+      throw new BadRequestException("El color principal no es válido");
+    }
+    if (
+      input.accentColor !== undefined &&
+      (typeof input.accentColor !== "string" || !COLOR.test(input.accentColor))
+    ) {
+      throw new BadRequestException("El color de acento no es válido");
+    }
+    const dashboard = { ...preferences.dashboard };
+    if (input.dashboard !== undefined) {
+      if (
+        !input.dashboard ||
+        typeof input.dashboard !== "object" ||
+        Array.isArray(input.dashboard)
+      ) {
+        throw new BadRequestException(
+          "La personalización del inicio no es válida",
+        );
+      }
+      for (const section of DASHBOARD_SECTIONS) {
+        const value = (input.dashboard as Record<string, unknown>)[section];
+        if (value !== undefined) {
+          if (typeof value !== "boolean") {
+            throw new BadRequestException(
+              "La visibilidad de cada sección debe ser verdadera o falsa",
+            );
+          }
+          dashboard[section] = value;
+        }
+      }
+    }
+    const updated: UiPreferences = {
+      primaryColor:
+        typeof input.primaryColor === "string"
+          ? input.primaryColor.toUpperCase()
+          : preferences.primaryColor,
+      accentColor:
+        typeof input.accentColor === "string"
+          ? input.accentColor.toUpperCase()
+          : preferences.accentColor,
+      dashboard,
+    };
+    await this.prisma.member.update({
+      where: { id: actor.memberId },
+      data: {
+        uiPreferences: JSON.parse(
+          JSON.stringify(updated),
+        ) as Prisma.InputJsonValue,
+      },
+    });
+    return updated;
+  }
+
+  private normalizeUiPreferences(raw: unknown): UiPreferences {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return structuredClone(DEFAULT_UI_PREFERENCES);
+    }
+    const value = raw as {
+      primaryColor?: unknown;
+      accentColor?: unknown;
+      dashboard?: unknown;
+    };
+    const dashboard = { ...DEFAULT_UI_PREFERENCES.dashboard };
+    if (
+      value.dashboard &&
+      typeof value.dashboard === "object" &&
+      !Array.isArray(value.dashboard)
+    ) {
+      for (const section of DASHBOARD_SECTIONS) {
+        const visible = (value.dashboard as Record<string, unknown>)[section];
+        if (typeof visible === "boolean") dashboard[section] = visible;
+      }
+    }
+    return {
+      primaryColor:
+        typeof value.primaryColor === "string" && COLOR.test(value.primaryColor)
+          ? value.primaryColor.toUpperCase()
+          : DEFAULT_UI_PREFERENCES.primaryColor,
+      accentColor:
+        typeof value.accentColor === "string" && COLOR.test(value.accentColor)
+          ? value.accentColor.toUpperCase()
+          : DEFAULT_UI_PREFERENCES.accentColor,
+      dashboard,
     };
   }
 

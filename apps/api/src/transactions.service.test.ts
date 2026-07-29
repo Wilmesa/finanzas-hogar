@@ -1,3 +1,4 @@
+import { BadRequestException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import type { Actor } from "./auth.js";
@@ -16,6 +17,42 @@ const actor: Actor = {
 };
 
 describe("TransactionsService idempotency", () => {
+  it("rechaza gastos manuales desde cuentas que no son principales", async () => {
+    const prisma = {
+      transactionAttribution: { findUnique: vi.fn(async () => null) },
+      member: { findFirst: vi.fn(async () => ({ id: actor.memberId })) },
+    };
+    const firefly = { listAssetAccounts: vi.fn() };
+    const accounts = {
+      assertPrimaryExpenseAccount: vi.fn(async () => {
+        throw new BadRequestException("Selecciona una cuenta principal");
+      }),
+    };
+    const service = new TransactionsService(
+      prisma as never,
+      firefly as never,
+      undefined,
+      accounts as never,
+    );
+
+    await expect(
+      service.create(
+        {
+          type: "withdrawal",
+          amount: "12000",
+          currency: "COP",
+          description: "Mercado",
+          sourceId: "secondary-account",
+          occurredAt: "2026-07-29T10:00:00.000Z",
+          fundingSourceScope: "household",
+        },
+        "manual-expense",
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(firefly.listAssetAccounts).not.toHaveBeenCalled();
+  });
+
   it("responde el mismo registro a tres reintentos sin volver a llamar Firefly", async () => {
     const existing = {
       id: "attribution-1",

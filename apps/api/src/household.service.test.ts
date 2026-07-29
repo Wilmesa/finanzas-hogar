@@ -45,4 +45,25 @@ describe("HouseholdService", () => {
       service.updateHousehold(memberActor, { name: "Otro hogar" }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it("guarda colores y visibilidad del inicio solo para el miembro actual", async () => {
+    const prisma = {
+      member: {
+        findUniqueOrThrow: vi.fn(async () => ({ uiPreferences: null })),
+        update: vi.fn(async ({ data }) => data),
+      },
+    };
+    const service = new HouseholdService(prisma as never, {} as never);
+    const result = await service.updateUiPreferences(memberActor, {
+      primaryColor: "#553C9A",
+      accentColor: "#D95D65",
+      dashboard: { advisor: false, accounts: true },
+    });
+
+    expect(result.dashboard.advisor).toBe(false);
+    expect(result.dashboard.accounts).toBe(true);
+    expect(prisma.member.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: memberActor.memberId } }),
+    );
+  });
 });

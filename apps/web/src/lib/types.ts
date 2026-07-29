@@ -1,6 +1,8 @@
 export interface PocketView {
   id: string;
   ownerMemberId?: string;
+  ownerName?: string;
+  canManage?: boolean;
   name: string;
   purpose: string;
   observations?: string;
@@ -21,6 +23,8 @@ export interface PocketView {
     reason?: string | null;
   }>;
   unreconciledAmount?: number;
+  defaultAccountId?: string | null;
+  defaultLedgerScope?: "household" | "private" | null;
   policyKind?: "target_by_date" | "target_by_contribution" | "periodic_spend";
   targetDate?: string;
   monthlyContribution?: number;
@@ -63,6 +67,7 @@ export interface AccountView {
   scope: "household" | "private";
   ownerMemberId?: string | null;
   ownerName: string;
+  isPrimary: boolean;
   icon: string;
   color: string;
   reservedAmount: number;
@@ -253,5 +258,17 @@ export interface FinanceState {
     householdName: string;
     baseCurrency: string;
     dailyReminder: string;
+    uiPreferences: {
+      primaryColor: string;
+      accentColor: string;
+      dashboard: {
+        accounts: boolean;
+        pocketTotals: boolean;
+        recentTransactions: boolean;
+        dailyBudget: boolean;
+        advisor: boolean;
+        nextIncome: boolean;
+      };
+    };
   };
 }

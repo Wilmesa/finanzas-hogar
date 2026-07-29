@@ -3,7 +3,9 @@
     allocateToPocket,
     archivePocket,
     createPocket,
+    deletePocketCreatedByMistake,
     financeData,
+    linkPocketAccount,
     releaseFromPocket,
     setPocketStatus,
     transferBetweenPockets,
@@ -11,7 +13,9 @@
   } from "$lib/finance-store";
   import PocketCard from "$lib/PocketCard.svelte";
   import type { PocketView } from "$lib/types";
-  let filter = $state<"all" | "household" | "private">("all");
+  let filter = $state<"household" | "private">("household");
+  let search = $state("");
+  let ownerFilter = $state("all");
   let creating = $state(false);
   let name = $state("");
   let observations = $state("");
@@ -50,8 +54,25 @@
   let archivingPocket = $state<PocketView | null>(null);
   let archiveDisposition = $state<"transfer" | "release">("transfer");
   let destinationPocketId = $state("");
+  let linkingPocket = $state<PocketView | null>(null);
+  let linkAccountId = $state("");
+  let deletingPocket = $state<PocketView | null>(null);
+  let deletionReason = $state("");
   const pockets = $derived($financeData.pockets);
-  const visible = $derived(filter === "all" ? pockets : pockets.filter((pocket) => pocket.visibility === filter));
+  const visible = $derived(
+    pockets.filter((pocket) => {
+      const matchesName = pocket.name
+        .toLocaleLowerCase("es")
+        .includes(search.trim().toLocaleLowerCase("es"));
+      return (
+        pocket.visibility === filter &&
+        matchesName &&
+        (filter === "private" ||
+          ownerFilter === "all" ||
+          pocket.ownerMemberId === ownerFilter)
+      );
+    }),
+  );
 
   async function savePocket() {
     error = "";
@@ -120,7 +141,15 @@
     allocationAccountId =
       $financeData.accounts.find(
         (account) =>
-          account.currency === pocket.currency && account.availableBalance > 0,
+          account.id === pocket.defaultAccountId &&
+          account.ownerMemberId === pocket.ownerMemberId &&
+          account.currency === pocket.currency,
+      )?.id ??
+      $financeData.accounts.find(
+        (account) =>
+          account.currency === pocket.currency &&
+          account.ownerMemberId === pocket.ownerMemberId &&
+          account.availableBalance > 0,
       )?.id ?? "";
   }
 
@@ -160,7 +189,8 @@
           candidate.id !== pocket.id &&
           candidate.status === "active" &&
           candidate.currency === pocket.currency &&
-          candidate.visibility === pocket.visibility,
+          candidate.visibility === pocket.visibility &&
+          candidate.ownerMemberId === pocket.ownerMemberId,
       )?.id ?? "";
   }
 
@@ -224,8 +254,9 @@
       (candidate) =>
         candidate.id !== pocket.id &&
         candidate.status === "active" &&
-        candidate.currency === pocket.currency &&
-        candidate.visibility === pocket.visibility,
+      candidate.currency === pocket.currency &&
+        candidate.visibility === pocket.visibility &&
+        candidate.ownerMemberId === pocket.ownerMemberId,
     )?.id ?? "";
   }
 
@@ -254,14 +285,79 @@
       saving = false;
     }
   }
+
+  function beginLink(pocket: PocketView) {
+    linkingPocket = pocket;
+    linkAccountId =
+      pocket.defaultAccountId ??
+      $financeData.accounts.find(
+        (account) =>
+          account.ownerMemberId === pocket.ownerMemberId &&
+          account.currency === pocket.currency,
+      )?.id ??
+      "";
+  }
+
+  async function confirmLink() {
+    if (!linkingPocket || !linkAccountId) return;
+    actionError = "";
+    saving = true;
+    try {
+      await linkPocketAccount(linkingPocket, linkAccountId);
+      linkingPocket = null;
+    } catch (cause) {
+      actionError =
+        cause instanceof Error
+          ? cause.message
+          : "No pudimos vincular la cuenta";
+    } finally {
+      saving = false;
+    }
+  }
+
+  function beginDelete(pocket: PocketView) {
+    deletingPocket = pocket;
+    deletionReason = "";
+  }
+
+  async function confirmDelete() {
+    if (!deletingPocket || deletionReason.trim().length < 5) {
+      actionError = "Explica brevemente por qué el bolsillo fue creado por error.";
+      return;
+    }
+    saving = true;
+    actionError = "";
+    try {
+      await deletePocketCreatedByMistake(
+        deletingPocket,
+        deletionReason.trim(),
+      );
+      deletingPocket = null;
+    } catch (cause) {
+      actionError =
+        cause instanceof Error
+          ? cause.message
+          : "No pudimos eliminar el bolsillo";
+    } finally {
+      saving = false;
+    }
+  }
 </script>
 
 <div class="page">
   <header class="page-header"><div><span class="eyebrow">Dinero con propósito</span><h1>Tus bolsillos</h1><p>Organiza el presente sin perder de vista lo que viene.</p></div><button class="primary-button desktop-action" onclick={() => (creating = !creating)}>＋ Nuevo bolsillo</button></header>
   <div class="filter-tabs" aria-label="Filtrar bolsillos">
-    <button class:active={filter === "all"} onclick={() => (filter = "all")}>Todos</button>
     <button class:active={filter === "household"} onclick={() => (filter = "household")}>Compartidos</button>
     <button class:active={filter === "private"} onclick={() => (filter = "private")}>Solo yo</button>
+  </div>
+  <div class="pocket-toolbar panel">
+    <label class="pocket-search"><span>Buscar por nombre</span><input type="search" placeholder="Ej. viaje, mercado o regalo" bind:value={search} /></label>
+    {#if filter === "household"}
+      <div class="owner-filter" aria-label="Filtrar por creador">
+        <button class:active={ownerFilter === "all"} onclick={() => (ownerFilter = "all")}>Ambos</button>
+        {#each $financeData.members as member}<button class:active={ownerFilter === member.id} onclick={() => (ownerFilter = member.id)}>{member.id === $financeData.settings.memberId ? "Mis bolsillos" : `De ${member.displayName}`}</button>{/each}
+      </div>
+    {/if}
   </div>
   {#if creating}
     <section class="create-pocket panel">
@@ -283,7 +379,7 @@
     </section>
   {/if}
   {#if actionError}<p class="form-error" role="alert">{actionError}</p>{/if}
-  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} />{#if (pocket.unreconciledAmount ?? 0) > 0}<p class="reconciliation-warning">⚠ {pocket.unreconciledAmount?.toLocaleString("es-CO")} {pocket.currency} por conciliar: no se restan de ninguna cuenta.</p>{/if}<div class="pocket-actions"><button onclick={() => beginAllocation(pocket)}>Reservar desde cuenta</button><button disabled={pocket.currentAmount <= 0} onclick={() => beginRelease(pocket)}>Liberar</button><button disabled={pocket.currentAmount <= 0} onclick={() => beginMove(pocket)}>Mover</button><button onclick={() => beginEdit(pocket)}>Editar</button><button onclick={() => changeStatus(pocket, pocket.status === "paused" ? "active" : "paused")}>{pocket.status === "paused" ? "Reanudar" : "Pausar"}</button><button class="danger-text" onclick={() => beginArchive(pocket)}>Archivar</button></div></div>{/each}</div>
+  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} /><div class="pocket-owner-line"><span>Creado por {pocket.ownerMemberId === $financeData.settings.memberId ? "ti" : pocket.ownerName}</span>{#if pocket.defaultAccountId}<small>Cuenta vinculada: {$financeData.accounts.find((account) => account.id === pocket.defaultAccountId)?.name ?? "Cuenta no disponible"}</small>{/if}</div>{#if (pocket.unreconciledAmount ?? 0) > 0}<p class="reconciliation-warning">⚠ {pocket.unreconciledAmount?.toLocaleString("es-CO")} {pocket.currency} por conciliar: no se restan de ninguna cuenta.</p>{/if}{#if pocket.canManage}<div class="pocket-actions"><button onclick={() => beginLink(pocket)}>Vincular cuenta</button><button onclick={() => beginAllocation(pocket)}>Reservar desde cuenta</button><button disabled={pocket.currentAmount <= 0} onclick={() => beginRelease(pocket)}>Liberar</button><button disabled={pocket.currentAmount <= 0} onclick={() => beginMove(pocket)}>Mover</button><button onclick={() => beginEdit(pocket)}>Editar</button><button onclick={() => changeStatus(pocket, pocket.status === "paused" ? "active" : "paused")}>{pocket.status === "paused" ? "Reanudar" : "Pausar"}</button><button class="danger-text" onclick={() => beginArchive(pocket)}>Archivar</button><button class="danger-text" onclick={() => beginDelete(pocket)}>Eliminar si fue un error</button></div>{:else}<p class="read-only-pocket">Puedes consultarlo, pero solo {pocket.ownerName ?? "su creador"} puede modificar o disponer de este bolsillo.</p>{/if}</div>{/each}</div>
   {#if visible.length === 0}<div class="empty-state panel"><strong>No hay bolsillos en esta vista</strong><p>Crea uno compartido o privado para reservar dinero con propósito.</p></div>{/if}
   <button class="fab mobile-only" onclick={() => (creating = !creating)}><span>＋</span> Nuevo</button>
 </div>
@@ -295,7 +391,7 @@
       <label>Cantidad<input type="number" min="1" bind:value={allocationAmount} /></label>
       <label>Tipo de registro<select bind:value={allocationMode}><option value="account">Reservar dinero de una cuenta</option><option value="initial_adjustment">Registrar saldo que ya existía</option><option value="correction">Corregir una reserva</option></select></label>
       {#if allocationMode === "account"}
-        <label>Cuenta de origen<select bind:value={allocationAccountId}><option value="">Seleccionar…</option>{#each $financeData.accounts.filter((account) => account.currency === pockets.find((pocket) => pocket.id === allocatingPocketId)?.currency) as account}<option value={account.id}>{account.icon} {account.name} · disponible {account.availableBalance.toLocaleString("es-CO")} {account.currency}</option>{/each}</select></label>
+        <label>Cuenta de origen<select bind:value={allocationAccountId}><option value="">Seleccionar…</option>{#each $financeData.accounts.filter((account) => account.currency === pockets.find((pocket) => pocket.id === allocatingPocketId)?.currency && account.ownerMemberId === pockets.find((pocket) => pocket.id === allocatingPocketId)?.ownerMemberId) as account}<option value={account.id}>{account.icon} {account.name} · disponible {account.availableBalance.toLocaleString("es-CO")} {account.currency}</option>{/each}</select></label>
       {:else}
         <label>Motivo obligatorio<textarea maxlength="500" bind:value={allocationReason} placeholder="Ej. saldo previo al comenzar a usar OKLE"></textarea></label>
       {/if}
@@ -356,12 +452,35 @@
       {#if archivingPocket.currentAmount > 0}
         <p>Este bolsillo conserva {archivingPocket.currentAmount.toLocaleString("es-CO")} {archivingPocket.currency}. Elige qué hacer con ese saldo.</p>
         <label><input type="radio" bind:group={archiveDisposition} value="transfer" /> Mover a otro bolsillo</label>
-        {#if archiveDisposition === "transfer"}<label>Destino<select bind:value={destinationPocketId}><option value="">Seleccionar…</option>{#each pockets.filter((candidate) => candidate.id !== archivingPocket?.id && candidate.status === "active" && candidate.currency === archivingPocket?.currency && candidate.visibility === archivingPocket?.visibility) as candidate}<option value={candidate.id}>{candidate.name}</option>{/each}</select></label>{/if}
+        {#if archiveDisposition === "transfer"}<label>Destino<select bind:value={destinationPocketId}><option value="">Seleccionar…</option>{#each pockets.filter((candidate) => candidate.id !== archivingPocket?.id && candidate.status === "active" && candidate.currency === archivingPocket?.currency && candidate.visibility === archivingPocket?.visibility && candidate.ownerMemberId === archivingPocket?.ownerMemberId) as candidate}<option value={candidate.id}>{candidate.name}</option>{/each}</select></label>{/if}
         <label><input type="radio" bind:group={archiveDisposition} value="release" /> Devolver al balance general</label>
       {:else}
         <p>El bolsillo no tiene saldo reservado. Se ocultará de las vistas activas.</p>
       {/if}
       <button class="danger-button" disabled={saving} onclick={confirmArchive}>{saving ? "Archivando…" : "Confirmar archivo"}</button>
+    </div>
+  </div>
+{/if}
+
+{#if linkingPocket}
+  <div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && (linkingPocket = null)}>
+    <div class="quick-entry compact" role="dialog" aria-modal="true" aria-labelledby="link-pocket-title">
+      <header><div><span class="eyebrow">Cuenta de respaldo</span><h2 id="link-pocket-title">Vincular {linkingPocket.name}</h2></div><button class="icon-button" onclick={() => (linkingPocket = null)} aria-label="Cerrar">×</button></header>
+      <label>Cuenta del creador<select bind:value={linkAccountId}><option value="">Seleccionar…</option>{#each $financeData.accounts.filter((account) => account.ownerMemberId === linkingPocket?.ownerMemberId && account.currency === linkingPocket?.currency) as account}<option value={account.id}>{account.icon} {account.name} · {account.ownerName} · {account.availableBalance.toLocaleString("es-CO")} disponible</option>{/each}</select></label>
+      {#if (linkingPocket.unreconciledAmount ?? 0) > 0}<p class="reconciliation-warning">Al confirmar, {linkingPocket.unreconciledAmount?.toLocaleString("es-CO")} {linkingPocket.currency} de saldo legado quedarán reservados desde esta cuenta.</p>{:else}<p class="privacy-note">La cuenta quedará sugerida para futuros aportes. Las reservas ya trazadas conservan su cuenta original.</p>{/if}
+      <button class="primary-button" disabled={saving || !linkAccountId} onclick={confirmLink}>{saving ? "Vinculando…" : "Vincular cuenta"}</button>
+    </div>
+  </div>
+{/if}
+
+{#if deletingPocket}
+  <div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && (deletingPocket = null)}>
+    <div class="quick-entry compact" role="dialog" aria-modal="true" aria-labelledby="delete-pocket-title">
+      <header><div><span class="eyebrow">Corrección excepcional</span><h2 id="delete-pocket-title">Eliminar {deletingPocket.name}</h2></div><button class="icon-button" onclick={() => (deletingPocket = null)} aria-label="Cerrar">×</button></header>
+      <p>Se eliminarán el bolsillo, su saldo virtual y sus aportes de planificación. No se creará un ingreso, gasto ni movimiento bancario.</p>
+      <label>Motivo obligatorio<textarea maxlength="500" bind:value={deletionReason} placeholder="Ej. saldo digitado por error antes de configurar las cuentas"></textarea></label>
+      <p class="privacy-note">OKLE bloqueará esta acción si el bolsillo ya participa en movimientos reales, pagos, inversiones o planes.</p>
+      <button class="danger-button" disabled={saving || deletionReason.trim().length < 5} onclick={confirmDelete}>{saving ? "Eliminando…" : "Eliminar definitivamente"}</button>
     </div>
   </div>
 {/if}

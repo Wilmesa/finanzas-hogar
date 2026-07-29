@@ -26,20 +26,34 @@ function prismaMock() {
       })),
       findUnique: vi.fn(),
       findMany: vi.fn(),
+      findUniqueOrThrow: vi.fn(async () => ({
+        id: "pocket-1",
+        version: 2,
+      })),
       updateMany: vi.fn(async () => ({ count: 1 })),
       update: vi.fn(async ({ data }) => ({
         id: "pocket-1",
         ...data,
       })),
+      delete: vi.fn(),
     },
     pocketFundingLot: {
       create: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
+      aggregate: vi.fn(async () => ({
+        _sum: { remainingAmount: new Prisma.Decimal(0) },
+      })),
     },
-    pocketEvent: { create: vi.fn() },
+    pocketEvent: { create: vi.fn(), count: vi.fn(async () => 0) },
+    transactionAttribution: { count: vi.fn(async () => 0) },
+    planFundingAllocation: { count: vi.fn(async () => 0) },
+    paymentOccurrence: { count: vi.fn(async () => 0) },
+    investmentPosition: { count: vi.fn(async () => 0) },
     accountProfile: { findUnique: vi.fn() },
     appNotification: { create: vi.fn() },
+    auditLog: { create: vi.fn() },
   };
   return {
     ...mock,
@@ -137,6 +151,7 @@ describe("PocketsService", () => {
         reservedAmount: new Prisma.Decimal(500),
         availableAmount: new Prisma.Decimal(1500),
       })),
+      assertOwnedAccount: vi.fn(),
     };
     const service = new PocketsService(prisma as never, accounts as never);
 
@@ -187,6 +202,7 @@ describe("PocketsService", () => {
         account: { id: "account-1", currency: "COP" },
         availableAmount: new Prisma.Decimal(100),
       })),
+      assertOwnedAccount: vi.fn(),
     };
     const service = new PocketsService(prisma as never, accounts as never);
 
@@ -224,6 +240,7 @@ describe("PocketsService", () => {
         id: "account-1",
         currency: "COP",
       })),
+      assertOwnedAccount: vi.fn(),
     };
     const service = new PocketsService(prisma as never, accounts as never);
 
@@ -262,6 +279,120 @@ describe("PocketsService", () => {
         currentAmount: { decrement: new Prisma.Decimal(500) },
         version: { increment: 1 },
       },
+    });
+  });
+
+  it("impide que otro miembro disponga de un bolsillo compartido", async () => {
+    const prisma = prismaMock();
+    prisma.pocket.findUnique.mockResolvedValue({
+      id: "shared-pocket",
+      householdId: actor.householdId,
+      ownerMemberId: "member-2",
+      visibility: "household",
+      currency: "COP",
+      currentAmount: new Prisma.Decimal(500),
+    });
+    const accounts = {
+      availableForAllocation: vi.fn(),
+      assertOwnedAccount: vi.fn(),
+    };
+    const service = new PocketsService(prisma as never, accounts as never);
+
+    await expect(
+      service.allocate(
+        "shared-pocket",
+        {
+          amount: "100",
+          sourceAccountId: "account-1",
+          sourceLedgerScope: "household",
+        },
+        "forbidden-allocation",
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(accounts.availableForAllocation).not.toHaveBeenCalled();
+  });
+
+  it("vincula el saldo legado únicamente a una cuenta del creador", async () => {
+    const prisma = prismaMock();
+    prisma.pocket.findUnique.mockResolvedValue({
+      id: "pocket-1",
+      householdId: actor.householdId,
+      ownerMemberId: actor.memberId,
+      visibility: "household",
+      currency: "COP",
+      currentAmount: new Prisma.Decimal(900),
+      version: 1,
+    });
+    prisma.pocketFundingLot.aggregate.mockResolvedValue({
+      _sum: { remainingAmount: new Prisma.Decimal(900) },
+    });
+    const accounts = {
+      availableForAllocation: vi.fn(async () => ({
+        account: { id: "account-1", currency: "COP" },
+        availableAmount: new Prisma.Decimal(1000),
+      })),
+      assertOwnedAccount: vi.fn(),
+    };
+    const service = new PocketsService(prisma as never, accounts as never);
+
+    await service.linkAccount(
+      "pocket-1",
+      {
+        accountId: "account-1",
+        ledgerScope: "household",
+        version: 1,
+      },
+      actor,
+    );
+
+    expect(accounts.assertOwnedAccount).toHaveBeenCalledWith(
+      "account-1",
+      "household",
+      actor.memberId,
+      actor,
+    );
+    expect(prisma.pocketFundingLot.updateMany).toHaveBeenCalledWith({
+      where: {
+        pocketId: "pocket-1",
+        sourceAccountId: null,
+        remainingAmount: { gt: 0 },
+      },
+      data: expect.objectContaining({
+        sourceAccountId: "account-1",
+        sourceLedgerScope: "household",
+        origin: "legacy_reconciliation",
+      }),
+    });
+  });
+
+  it("elimina un bolsillo creado por error sin crear movimientos", async () => {
+    const prisma = prismaMock();
+    prisma.pocket.findUnique.mockResolvedValue({
+      id: "pocket-1",
+      householdId: actor.householdId,
+      ownerMemberId: actor.memberId,
+      visibility: "household",
+      currency: "COP",
+      currentAmount: new Prisma.Decimal(5_000_000),
+    });
+    const service = new PocketsService(prisma as never, {} as never);
+
+    await service.deleteCreatedByMistake(
+      "pocket-1",
+      {
+        confirmation: "ELIMINAR",
+        reason: "Saldo digitado por error",
+      },
+      actor,
+    );
+
+    expect(prisma.pocket.delete).toHaveBeenCalledWith({
+      where: { id: "pocket-1" },
+    });
+    expect(prisma.pocketEvent.create).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: "deleted_as_mistake" }),
     });
   });
 });
