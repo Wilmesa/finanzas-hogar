@@ -860,5 +860,16 @@ La actualización del servidor se realizará únicamente después de revisión m
   imágenes Docker no utilizadas (2,293 GB internos); el archivo de disco de
   Colima no devolvió ese espacio al host, que continuó con 117 MiB libres. No
   se presenta este fallo de infraestructura como una validación aprobada.
+- Después de liberar espacio adicional se repitieron las pruebas. Las imágenes
+  API, PWA y AI-CFO construyeron correctamente desde sus Dockerfiles. El primer
+  reintento de API agotó el tiempo de descarga de npm; el segundo completó los
+  199 paquetes, generó Prisma y compiló TypeScript dentro del contenedor.
+- `scripts/smoke-local-auth.sh` ahora acepta tanto el plugin `docker compose`
+  como el binario standalone `docker-compose`, igual que `scripts/compose.sh`.
+  En un proyecto Compose aislado aplicó correctamente las 12 migraciones,
+  levantó gateway, web, API, AI-CFO, PostgreSQL, Redis y Firefly saludables, y
+  verificó login, perfil, creación de bolsillo, AI-CFO determinístico, PWA,
+  logout y revocación. El entorno y sus volúmenes efímeros se eliminaron al
+  terminar.
 - La migración debe aplicarse al servidor solo después de backup, revisión y
   merge, mediante `DEPLOY_TARGET=private scripts/update-server.sh`.
