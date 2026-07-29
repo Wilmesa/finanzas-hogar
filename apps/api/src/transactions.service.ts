@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import { canReadPocket } from "@finanzas/domain";
 import { z } from "zod";
 import type { Actor } from "./auth.js";
+import { AccountsService } from "./accounts.service.js";
 import { FireflyClient } from "./firefly.client.js";
 import { PrivateMetadataService } from "./private-metadata.service.js";
 import { PrismaService } from "./prisma.service.js";
@@ -53,6 +54,7 @@ export class TransactionsService {
     private readonly prisma: PrismaService,
     private readonly firefly: FireflyClient,
     private readonly privateMetadata: PrivateMetadataService = new PrivateMetadataService(),
+    private readonly accounts?: AccountsService,
   ) {}
 
   async list(actor: Actor) {
@@ -227,6 +229,20 @@ export class TransactionsService {
       scope === "private" && input.fundingSourceScope === "household"
         ? "household"
         : scope;
+    if (
+      input.type === "withdrawal" &&
+      (!ingestion ||
+        ingestion.origin === "MANUAL" ||
+        ingestion.origin === "OFFLINE_SYNC") &&
+      input.sourceId &&
+      this.accounts
+    ) {
+      await this.accounts.assertPrimaryExpenseAccount(
+        input.sourceId,
+        fireflyScope,
+        actor,
+      );
+    }
     const availableAccounts = await this.firefly.listAssetAccounts(
       fireflyScope,
       payerMemberId,

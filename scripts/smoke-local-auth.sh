@@ -4,7 +4,8 @@ set -eu
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 
-if ! docker compose version >/dev/null 2>&1; then
+if ! docker compose version >/dev/null 2>&1 &&
+  ! docker-compose version >/dev/null 2>&1; then
   echo "Docker Compose no está disponible; smoke test no ejecutado." >&2
   exit 2
 fi
@@ -30,7 +31,7 @@ show_logs() { scripts/compose.sh logs --no-color --tail=200 api gateway postgres
 cleanup() {
   status=$?
   if [ "$status" -ne 0 ]; then show_logs; fi
-  scripts/compose.sh down --remove-orphans >/dev/null 2>&1 || true
+  scripts/compose.sh down --volumes --remove-orphans >/dev/null 2>&1 || true
   find "$work_dir" -type f -delete
   rmdir "$work_dir" 2>/dev/null || true
   exit "$status"

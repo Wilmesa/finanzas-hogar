@@ -3,6 +3,7 @@ import { get, writable } from "svelte/store";
 import { apiRequest } from "./api";
 import { isServerMode } from "./auth";
 import { queueOfflineTransaction } from "./offline-queue";
+import { applyInterfaceColors } from "./theme";
 import {
   pockets as demoPockets,
   transactions as demoTransactions,
@@ -26,6 +27,18 @@ import type {
 
 const STORAGE_KEY = "okle:v3";
 const LEGACY_STORAGE_KEY = "finnest:v3";
+const defaultUiPreferences: FinanceState["settings"]["uiPreferences"] = {
+  primaryColor: "#123C69",
+  accentColor: "#B9862E",
+  dashboard: {
+    accounts: true,
+    pocketTotals: true,
+    recentTransactions: true,
+    dailyBudget: true,
+    advisor: true,
+    nextIncome: true,
+  },
+};
 const defaultCategories: CategoryView[] = [
   {
     id: "category-market",
@@ -56,7 +69,12 @@ const defaultCategories: CategoryView[] = [
 ];
 const demoInitial: FinanceState = {
   schemaVersion: 3,
-  pockets: structuredClone(demoPockets),
+  pockets: structuredClone(demoPockets).map((pocket) => ({
+    ...pocket,
+    ownerMemberId: "demo-me",
+    ownerName: "Tú",
+    canManage: true,
+  })),
   transactions: structuredClone(demoTransactions),
   accounts: [
     {
@@ -68,6 +86,7 @@ const demoInitial: FinanceState = {
       scope: "household",
       ownerMemberId: "demo-me",
       ownerName: "Tú",
+      isPrimary: true,
       icon: "🏦",
       color: "#059669",
       reservedAmount: 0,
@@ -82,6 +101,7 @@ const demoInitial: FinanceState = {
       scope: "private",
       ownerMemberId: "demo-me",
       ownerName: "Tú",
+      isPrimary: false,
       icon: "💳",
       color: "#059669",
       reservedAmount: 0,
@@ -212,6 +232,7 @@ const demoInitial: FinanceState = {
     householdName: "Nuestro hogar",
     baseCurrency: "COP",
     dailyReminder: "20:00",
+    uiPreferences: structuredClone(defaultUiPreferences),
   },
 };
 
@@ -243,6 +264,7 @@ const serverInitial: FinanceState = {
     householdName: "",
     baseCurrency: "COP",
     dailyReminder: "20:00",
+    uiPreferences: structuredClone(defaultUiPreferences),
   },
 };
 
@@ -266,7 +288,37 @@ function readLocal(): FinanceState {
       ...initial,
       ...parsed,
       schemaVersion: 3,
-      accounts: parsed.accounts ?? initial.accounts,
+      pockets: (parsed.pockets ?? initial.pockets).map((pocket) => ({
+        ...pocket,
+        ownerMemberId:
+          pocket.ownerMemberId ??
+          parsed.settings?.memberId ??
+          initial.settings.memberId,
+        ownerName:
+          pocket.ownerName ??
+          parsed.settings?.memberName ??
+          initial.settings.memberName,
+        canManage: pocket.canManage ?? true,
+      })),
+      accounts: (parsed.accounts ?? initial.accounts).map((account) => ({
+        ...account,
+        ownerMemberId:
+          account.ownerMemberId ??
+          parsed.settings?.memberId ??
+          initial.settings.memberId,
+        ownerName:
+          account.ownerName ??
+          parsed.settings?.memberName ??
+          initial.settings.memberName,
+        isPrimary: account.isPrimary ?? account.scope === "household",
+        currentBalance: Number(account.currentBalance ?? 0),
+        reservedAmount: Number(account.reservedAmount ?? 0),
+        availableBalance: Number(
+          account.availableBalance ??
+            Number(account.currentBalance ?? 0) -
+              Number(account.reservedAmount ?? 0),
+        ),
+      })),
       categories: parsed.categories ?? initial.categories,
       accountConnections:
         parsed.accountConnections ?? initial.accountConnections,
@@ -276,6 +328,18 @@ function readLocal(): FinanceState {
       incomeSources: parsed.incomeSources ?? initial.incomeSources,
       expectedIncomes: parsed.expectedIncomes ?? initial.expectedIncomes,
       fundingPlans: parsed.fundingPlans ?? initial.fundingPlans,
+      settings: {
+        ...initial.settings,
+        ...(parsed.settings ?? {}),
+        uiPreferences: {
+          ...defaultUiPreferences,
+          ...(parsed.settings?.uiPreferences ?? {}),
+          dashboard: {
+            ...defaultUiPreferences.dashboard,
+            ...(parsed.settings?.uiPreferences?.dashboard ?? {}),
+          },
+        },
+      },
     };
   } catch {
     return initial;
@@ -286,6 +350,10 @@ export const financeData = writable<FinanceState>(readLocal());
 
 if (browser) {
   financeData.subscribe((value) => {
+    applyInterfaceColors(
+      value.settings.uiPreferences.primaryColor,
+      value.settings.uiPreferences.accentColor,
+    );
     if (!isServerMode())
       localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
   });
@@ -303,6 +371,11 @@ function serverPocketToView(item: Record<string, unknown>): PocketView {
   return {
     id: String(item.id),
     ownerMemberId: String(item.ownerMemberId),
+    ownerName: String(
+      (item.owner as Record<string, unknown> | undefined)?.displayName ??
+        "Miembro",
+    ),
+    canManage: Boolean(item.canManage),
     name: String(item.name),
     purpose: String(item.purpose),
     ...(item.notes ? { observations: String(item.notes) } : {}),
@@ -321,6 +394,15 @@ function serverPocketToView(item: Record<string, unknown>): PocketView {
     monthlyContribution: Number(policy.contributionAmount ?? 0) || undefined,
     version: Number(item.version ?? 1),
     status: (item.status as PocketView["status"]) ?? "active",
+    defaultAccountId: item.defaultAccountId
+      ? String(item.defaultAccountId)
+      : null,
+    defaultLedgerScope:
+      item.defaultLedgerScope === "private"
+        ? "private"
+        : item.defaultLedgerScope === "household"
+          ? "household"
+          : null,
     fundingLots: ((item.fundingLots ?? []) as Record<string, unknown>[]).map(
       (lot) => ({
         id: String(lot.id),
@@ -479,6 +561,7 @@ export async function hydrateFinanceData(): Promise<void> {
       scope: item.scope === "private" ? "private" : "household",
       ownerMemberId: item.ownerMemberId ? String(item.ownerMemberId) : null,
       ownerName: String(item.ownerName ?? "Hogar"),
+      isPrimary: item.isPrimary !== false,
       icon: String(item.icon ?? "🏦"),
       color: String(item.color ?? "#123C69"),
       reservedAmount: Number(item.reservedAmount ?? 0),
@@ -523,6 +606,17 @@ export async function hydrateFinanceData(): Promise<void> {
           ?.color?.toString() ?? "#059669",
       householdName: String(household.name),
       baseCurrency: String(household.baseCurrency),
+      uiPreferences: {
+        ...defaultUiPreferences,
+        ...((household.uiPreferences ??
+          {}) as FinanceState["settings"]["uiPreferences"]),
+        dashboard: {
+          ...defaultUiPreferences.dashboard,
+          ...(((household.uiPreferences as Record<string, unknown> | undefined)
+            ?.dashboard ??
+            {}) as FinanceState["settings"]["uiPreferences"]["dashboard"]),
+        },
+      },
     },
     incomeSources: planningSources.map(serverIncomeSourceToView),
     expectedIncomes: planningIncomes.map(serverExpectedIncomeToView),
@@ -584,6 +678,14 @@ export async function hydrateFinanceData(): Promise<void> {
           : "MANUAL",
     })),
   }));
+  const preferences =
+    (household.uiPreferences as
+      FinanceState["settings"]["uiPreferences"] | undefined) ??
+    defaultUiPreferences;
+  applyInterfaceColors(
+    preferences.primaryColor ?? defaultUiPreferences.primaryColor,
+    preferences.accentColor ?? defaultUiPreferences.accentColor,
+  );
 }
 
 export async function createPocket(input: {
@@ -630,14 +732,28 @@ export async function createPocket(input: {
         policy,
       }),
     });
-    financeData.update((state) => ({
-      ...state,
-      pockets: [serverPocketToView(created), ...state.pockets],
-    }));
+    financeData.update((state) => {
+      const pocket = serverPocketToView(created);
+      return {
+        ...state,
+        pockets: [
+          {
+            ...pocket,
+            ownerMemberId: state.settings.memberId,
+            ownerName: state.settings.memberName,
+            canManage: true,
+          },
+          ...state.pockets,
+        ],
+      };
+    });
     return String(created.id);
   }
   const pocket: PocketView = {
     id: crypto.randomUUID(),
+    ownerMemberId: get(financeData).settings.memberId,
+    ownerName: get(financeData).settings.memberName,
+    canManage: true,
     name: input.name,
     purpose: "custom",
     ...(input.observations?.trim()
@@ -756,6 +872,118 @@ export async function archivePocket(
   await hydrateFinanceData();
 }
 
+export async function linkPocketAccount(
+  pocket: PocketView,
+  accountId: string,
+): Promise<void> {
+  const state = get(financeData);
+  const account = state.accounts.find((item) => item.id === accountId);
+  if (!account) throw new Error("Selecciona una cuenta válida");
+  if (account.ownerMemberId !== pocket.ownerMemberId) {
+    throw new Error(
+      "El bolsillo solo puede vincularse a una cuenta de su creador",
+    );
+  }
+  if (account.currency !== pocket.currency) {
+    throw new Error("La cuenta y el bolsillo deben usar la misma moneda");
+  }
+  if (isServerMode()) {
+    await apiRequest(`/v1/pockets/${pocket.id}/account`, {
+      method: "PUT",
+      body: JSON.stringify({
+        accountId: account.id,
+        ledgerScope: account.scope,
+        version: pocket.version ?? 1,
+      }),
+    });
+    await hydrateFinanceData();
+    return;
+  }
+  const unreconciled = pocket.unreconciledAmount ?? 0;
+  if (unreconciled > account.availableBalance) {
+    throw new Error("La cuenta no tiene disponibilidad suficiente");
+  }
+  financeData.update((current) => ({
+    ...current,
+    pockets: current.pockets.map((item) =>
+      item.id === pocket.id
+        ? {
+            ...item,
+            defaultAccountId: account.id,
+            defaultLedgerScope: account.scope,
+            unreconciledAmount: 0,
+            version: (item.version ?? 1) + 1,
+            fundingLots: item.fundingLots?.map((lot) =>
+              !lot.sourceAccountId && lot.remainingAmount > 0
+                ? {
+                    ...lot,
+                    sourceAccountId: account.id,
+                    sourceLedgerScope: account.scope,
+                    origin: "legacy_reconciliation",
+                  }
+                : lot,
+            ),
+          }
+        : item,
+    ),
+    accounts: current.accounts.map((item) =>
+      item.id === account.id
+        ? {
+            ...item,
+            reservedAmount: item.reservedAmount + unreconciled,
+            availableBalance: item.availableBalance - unreconciled,
+          }
+        : item,
+    ),
+  }));
+}
+
+export async function deletePocketCreatedByMistake(
+  pocket: PocketView,
+  reason: string,
+): Promise<void> {
+  if (isServerMode()) {
+    await apiRequest(`/v1/pockets/${pocket.id}/delete-mistake`, {
+      method: "POST",
+      body: JSON.stringify({ confirmation: "ELIMINAR", reason }),
+    });
+    await hydrateFinanceData();
+    return;
+  }
+  financeData.update((state) => ({
+    ...state,
+    pockets: state.pockets.filter((item) => item.id !== pocket.id),
+    accounts: state.accounts.map((account) => {
+      const released = (pocket.fundingLots ?? [])
+        .filter((lot) => lot.sourceAccountId === account.id)
+        .reduce((sum, lot) => sum + lot.remainingAmount, 0);
+      return released
+        ? {
+            ...account,
+            reservedAmount: Math.max(0, account.reservedAmount - released),
+            availableBalance: account.availableBalance + released,
+          }
+        : account;
+    }),
+  }));
+}
+
+export async function saveUiPreferences(
+  preferences: FinanceState["settings"]["uiPreferences"],
+): Promise<void> {
+  if (isServerMode()) {
+    await apiRequest("/v1/profile/ui-preferences", {
+      method: "PATCH",
+      body: JSON.stringify(preferences),
+    });
+  }
+  financeData.update((state) => ({
+    ...state,
+    settings: { ...state.settings, uiPreferences: preferences },
+  }));
+  applyInterfaceColors(preferences.primaryColor, preferences.accentColor);
+}
+
 export async function createTransaction(input: {
   amount: number;
   merchant: string;
@@ -770,6 +998,14 @@ export async function createTransaction(input: {
   const kind = input.kind ?? "expense";
   const account = state.accounts.find((item) => item.id === input.accountId);
   if (!account) throw new Error("Selecciona una cuenta válida");
+  if (
+    kind === "expense" &&
+    (!account.isPrimary || account.scope !== "household")
+  ) {
+    throw new Error(
+      "Los gastos solo pueden registrarse desde una cuenta principal compartida",
+    );
+  }
   const destinationAccount =
     kind === "transfer"
       ? state.accounts.find((item) => item.id === input.destinationAccountId)
@@ -1179,6 +1415,7 @@ export async function createAccount(input: {
   openingBalance?: number;
   openingBalanceDate?: string;
   ownerMemberId?: string | null;
+  isPrimary?: boolean;
   icon?: string;
   color?: string;
 }): Promise<void> {
@@ -1197,6 +1434,7 @@ export async function createAccount(input: {
           ownerName:
             state.members.find((member) => member.id === input.ownerMemberId)
               ?.displayName ?? (input.scope === "private" ? "Tú" : "Hogar"),
+          isPrimary: input.isPrimary ?? true,
           icon: input.icon ?? "🏦",
           color: input.color ?? "#123C69",
           reservedAmount: 0,
@@ -1226,6 +1464,7 @@ export async function updateAccount(
     name?: string;
     currency?: string;
     ownerMemberId?: string | null;
+    isPrimary?: boolean;
     icon?: string;
     color?: string;
   },

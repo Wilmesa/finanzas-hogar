@@ -21,6 +21,7 @@
   let ownerMemberId = $state<string | null>(null);
   let icon = $state("🏦");
   let color = $state("#123C69");
+  let isPrimary = $state(true);
 
   function openCreate(selectedScope: "household" | "private" = "household") {
     editing = null;
@@ -32,6 +33,7 @@
     ownerMemberId = null;
     icon = "🏦";
     color = "#123C69";
+    isPrimary = selectedScope === "household";
     creating = true;
     error = "";
   }
@@ -44,6 +46,7 @@
     ownerMemberId = account.ownerMemberId ?? null;
     icon = account.icon;
     color = account.color;
+    isPrimary = account.isPrimary;
     creating = true;
     error = "";
   }
@@ -57,7 +60,7 @@
     saving = true;
     try {
       if (editing) {
-        await updateAccount(editing, { name: name.trim(), currency: currencyCode, ownerMemberId, icon, color });
+        await updateAccount(editing, { name: name.trim(), currency: currencyCode, ownerMemberId, isPrimary: scope === "household" && isPrimary, icon, color });
         message = "Cuenta actualizada en Firefly.";
       } else {
         await createAccount({
@@ -65,6 +68,7 @@
           ...(openingBalance !== undefined ? { openingBalance } : {}),
           ...(openingBalance !== undefined ? { openingBalanceDate: new Date().toISOString().slice(0, 10) } : {}),
           ownerMemberId,
+          isPrimary: scope === "household" && isPrimary,
           icon,
           color,
         });
@@ -117,6 +121,7 @@
         {#if !editing}<label>Alcance<select bind:value={scope}><option value="household">Compartida</option><option value="private">Solo yo</option></select></label><label>Saldo inicial opcional<input type="number" bind:value={openingBalance} /></label>{/if}
         {#if scope === "household"}<label>Cuenta a nombre de<select bind:value={ownerMemberId}><option value={null}>Del hogar</option>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label>{/if}
       </div>
+      {#if scope === "household"}<label class="switch-row"><input type="checkbox" bind:checked={isPrimary} /> Cuenta principal <small>Aparecerá al registrar gastos para cualquiera de los dos miembros.</small></label>{/if}
       <p class="privacy-note">El saldo proviene de Firefly. Un saldo inicial crea el asiento contable correspondiente; no es una reserva virtual.</p>
       {#if error}<p class="form-error" role="alert">{error}</p>{/if}
       <button class="primary-button" disabled={saving} onclick={save}>{saving ? "Guardando…" : editing ? "Guardar cambios" : "Crear cuenta"}</button>
@@ -133,7 +138,7 @@
         {#each $financeData.accounts.filter((account) => account.scope === accountScope) as account}
           <div class="account-row">
             <span class="account-icon" style={`background:${account.color}20;color:${account.color}`}>{account.icon}</span>
-            <span><strong>{account.name}</strong><small>{account.ownerName} · {account.type} · {account.currency} · {account.scope === "private" ? "Solo yo" : "Compartida"}</small></span>
+            <span><strong>{account.name}</strong><small>{account.ownerName} · {account.type} · {account.currency} · {account.scope === "private" ? "Solo yo" : account.isPrimary ? "Principal" : "No disponible para gastos"}</small></span>
             <span class="account-totals"><strong>{currency(account.availableBalance, account.currency)} disponible</strong><small>{currency(account.currentBalance, account.currency)} real · {currency(account.reservedAmount, account.currency)} en bolsillos</small></span>
             <div class="row-actions"><button onclick={() => openEdit(account)}>Editar</button><button class="danger-action" onclick={() => archive(account)}>Archivar</button></div>
           </div>

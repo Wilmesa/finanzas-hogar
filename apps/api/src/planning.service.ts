@@ -695,6 +695,12 @@ export class PlanningService {
     if (!allocation || !this.canRead(allocation.plan, actor)) {
       throw new NotFoundException();
     }
+    if (
+      allocation.pocket &&
+      allocation.pocket.ownerMemberId !== actor.memberId
+    ) {
+      throw new NotFoundException();
+    }
     if (allocation.expectedIncome.status !== "received") {
       throw new ConflictException(
         "Confirma primero que el ingreso fue recibido",
@@ -734,6 +740,14 @@ export class PlanningService {
     const incomeLedgerScope =
       allocation.expectedIncome.actualTransaction?.ledgerScope ?? null;
     if (incomeAccountId && incomeLedgerScope) {
+      if (allocation.pocket) {
+        await this.accounts.assertOwnedAccount(
+          incomeAccountId,
+          incomeLedgerScope,
+          allocation.pocket.ownerMemberId,
+          actor,
+        );
+      }
       const availability = await this.accounts.availableForAllocation(
         incomeAccountId,
         incomeLedgerScope,
@@ -841,6 +855,7 @@ export class PlanningService {
         allocations: {
           where: { expectedIncomeId: parsed.data.expectedIncomeId },
           orderBy: { priority: "asc" },
+          include: { pocket: true },
         },
       },
     });
@@ -867,6 +882,15 @@ export class PlanningService {
       throw new BadRequestException(
         "El plan no tiene destinos para este ingreso",
       );
+    }
+    if (
+      plan.allocations.some(
+        (allocation) =>
+          allocation.pocket &&
+          allocation.pocket.ownerMemberId !== actor.memberId,
+      )
+    ) {
+      throw new NotFoundException();
     }
     const base = income.actualAmount ?? income.expectedAmount;
     const preview = previewExpectedIncomeFunding({
@@ -900,6 +924,17 @@ export class PlanningService {
       incomeLedgerScope &&
       totalPocketAllocation.greaterThan(0)
     ) {
+      const targetPocket = plan.allocations.find(
+        (allocation) => allocation.pocket,
+      )?.pocket;
+      if (targetPocket) {
+        await this.accounts.assertOwnedAccount(
+          incomeAccountId,
+          incomeLedgerScope,
+          targetPocket.ownerMemberId,
+          actor,
+        );
+      }
       const availability = await this.accounts.availableForAllocation(
         incomeAccountId,
         incomeLedgerScope,
@@ -1195,6 +1230,7 @@ export class PlanningService {
       pockets.some(
         (pocket) =>
           !this.canRead(pocket, actor) ||
+          pocket.ownerMemberId !== actor.memberId ||
           pocket.visibility !== visibility ||
           pocket.currency !== currency,
       ) ||

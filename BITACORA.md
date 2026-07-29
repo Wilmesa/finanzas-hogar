@@ -783,3 +783,93 @@ La actualización del servidor se realizará únicamente después de revisión m
   ancho. `body`, `main` y `.more-page` miden 390 px.
 - Búsqueda de secretos: sin llaves privadas, tokens o contraseñas nuevas; el
   único archivo de entorno versionado continúa siendo `.env.example`.
+
+## 2026-07-29 — Propiedad de bolsillos, Inicio personalizable y QA móvil
+
+### Hallazgos
+
+- Un miembro podía intentar administrar un bolsillo compartido creado por su
+  pareja; la visibilidad estaba separada de la propiedad operativa.
+- Los bolsillos históricos sin cuenta de origen no tenían un flujo explícito
+  para vincularse y una reserva creada por error no podía eliminarse de forma
+  segura.
+- Inicio repetía cada bolsillo, no podía personalizarse y no resumía cuánto
+  tenía reservado cada persona.
+- Bolsillos conservaba un filtro redundante, carecía de búsqueda y mezclaba
+  propietarios. El análisis de Movimientos no ofrecía una gráfica legible en
+  móvil.
+- La campana podía superar el viewport y ocultar texto fuera de la pantalla.
+- Los gastos manuales ofrecían cuentas que no debían actuar como cuentas
+  principales del hogar.
+
+### Implementado
+
+- Autoridad por creador: solamente quien creó un bolsillo puede editar,
+  aportar, liberar, mover, vincular, archivar o eliminar. La pareja puede
+  consultar los compartidos, pero los controles son de solo lectura. La API
+  aplica la regla aunque se omita la interfaz.
+- Endpoint de vinculación a una cuenta del creador. También concilia lotes
+  históricos sin origen, validando propietario, moneda y disponibilidad, sin
+  inventar una transferencia Firefly.
+- Eliminación excepcional de bolsillo creado por error con motivo y
+  confirmación `ELIMINAR`. Solo procede si no hay transacciones, pagos,
+  inversiones, planes ejecutados ni eventos reales relacionados; elimina la
+  reserva virtual sin crear ingreso o gasto ficticio y registra auditoría.
+- Cuentas marcables como principales. Un gasto manual solo acepta una cuenta
+  principal del libro compartido; ingresos, transferencias e importaciones
+  conservan sus reglas propias.
+- Inicio reemplaza tarjetas individuales por totales visibles de bolsillos por
+  miembro y muestra después los movimientos recientes. Cada miembro puede
+  ocultar o restaurar seis secciones de forma independiente.
+- Bolsillos añade búsqueda por nombre, vistas **Compartidos** y **Solo yo**, y
+  filtros por propietario dentro de los compartidos. Se eliminó **Todos**.
+- Movimientos incorpora barras horizontales por categoría y persona, con total
+  y porcentajes, en dos columnas de escritorio y una columna móvil sin recorte.
+- Campana fijada al viewport, con ancho máximo, desplazamiento interno, ajuste
+  de palabras y cierre visible.
+- Apariencia por miembro con cuatro presets o colores principal/acento
+  personalizados. Los colores de cada bolsillo siguen siendo independientes y
+  solo los modifica su creador.
+- Migración aditiva
+  `202607290001_pocket_ownership_ui_preferences`; no borra ni transforma datos.
+
+### Verificación
+
+- `CI=true pnpm install --frozen-lockfile`: correcto.
+- `CI=true pnpm db:generate`: correcto, sin versionar Prisma Client.
+- `CI=true pnpm verify`: correcto; TypeScript/Svelte sin errores ni
+  advertencias, API 67/67, dominio 24/24, web 2/2, operaciones 18/18, builds de
+  producción y formato correctos.
+- `python3 -m pytest services/ai-cfo/tests -q`: 7/7 aprobadas.
+- QA en navegador a 390 × 844: Inicio, Bolsillos, Movimientos y Más miden el
+  ancho completo; el panel de notificaciones queda entre 10 y 380 px, sin
+  desbordamiento; el análisis usa una sola columna.
+- Se probaron búsqueda y filtros, modal de vinculación, eliminación segura,
+  personalización de Inicio, cuatro presets de apariencia y selector de gasto
+  restringido a cuentas principales.
+
+### Despliegue y pendientes honestos
+
+- El despliegue completo local se detuvo correctamente en preflight porque el
+  `.env` de esta estación no contiene los tres tokens Firefly reales. No se
+  agregaron valores falsos ni secretos al repositorio.
+- Las configuraciones Compose privada, pública y n8n opcional son válidas. El
+  build Docker compiló PWA y AI-CFO, pero el daemon no pudo exportar la capa de
+  la API porque el volumen de datos de macOS llegó al 100 % y `containerd`
+  devolvió `input/output error`. Se eliminaron, con autorización, únicamente
+  imágenes Docker no utilizadas (2,293 GB internos); el archivo de disco de
+  Colima no devolvió ese espacio al host, que continuó con 117 MiB libres. No
+  se presenta este fallo de infraestructura como una validación aprobada.
+- Después de liberar espacio adicional se repitieron las pruebas. Las imágenes
+  API, PWA y AI-CFO construyeron correctamente desde sus Dockerfiles. El primer
+  reintento de API agotó el tiempo de descarga de npm; el segundo completó los
+  199 paquetes, generó Prisma y compiló TypeScript dentro del contenedor.
+- `scripts/smoke-local-auth.sh` ahora acepta tanto el plugin `docker compose`
+  como el binario standalone `docker-compose`, igual que `scripts/compose.sh`.
+  En un proyecto Compose aislado aplicó correctamente las 12 migraciones,
+  levantó gateway, web, API, AI-CFO, PostgreSQL, Redis y Firefly saludables, y
+  verificó login, perfil, creación de bolsillo, AI-CFO determinístico, PWA,
+  logout y revocación. El entorno y sus volúmenes efímeros se eliminaron al
+  terminar.
+- La migración debe aplicarse al servidor solo después de backup, revisión y
+  merge, mediante `DEPLOY_TARGET=private scripts/update-server.sh`.

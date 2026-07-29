@@ -46,13 +46,16 @@ contable para ese alcance.
 
 ## Paso 2: entendiendo la pantalla principal
 
-El selector **Compartido / Solo yo** cambia el alcance de toda la cifra
-principal.
+Inicio presenta el dinero sin mezclar cuentas bancarias y reservas:
 
-- **Saldo real:** suma las cuentas Firefly del alcance y de la moneda base.
-- **Reservado virtualmente:** suma los bolsillos no archivados del mismo alcance
-  y moneda.
-- **Disponible después de compromisos:** saldo real menos dinero reservado.
+- **Saldo bancario:** dinero real registrado en cada cuenta de Firefly.
+- **En bolsillos:** parte de esa cuenta que OKLE reservó virtualmente para
+  propósitos concretos.
+- **Disponible:** saldo bancario menos las reservas trazables de esa misma
+  cuenta.
+- **Total visible en bolsillos — [persona]:** suma los bolsillos en moneda base
+  que puedes consultar de esa persona. Tu total incluye tus bolsillos privados;
+  el de tu pareja solo incluye los compartidos.
 
 OKLE no suma COP, USD y EUR como si fueran la misma moneda. Si Firefly no está
 configurado o no responde, el saldo real aparece como **—**; la aplicación no
@@ -62,9 +65,10 @@ Si existe un bolsillo activo con **límite periódico**, el panel muestra el
 porcentaje gastado durante el mes y divide su reserva restante entre los días
 que quedan. Si no existe, dice **Sin configurar**.
 
-Más abajo aparecen los bolsillos activos, los últimos movimientos, el próximo
-ingreso planeado y el último análisis del Asesor. Un análisis vacío significa
-que todavía no hay evidencia suficiente.
+Los movimientos recientes aparecen justo después de los totales. Pulsa
+**Personalizar** para ocultar o volver a mostrar cuentas, totales, movimientos,
+presupuesto diario, Asesor y próximo ingreso. Cada persona conserva su propia
+selección.
 
 ## Paso 3: el día a día
 
@@ -72,13 +76,16 @@ que todavía no hay evidencia suficiente.
 
 1. Pulsa **Registrar** en Inicio, o abre **Movimientos → Registrar**.
 2. Escribe cantidad y comercio o descripción.
-3. Elige bolsillo, cuenta o tarjeta, categoría y quién pagó.
+3. Elige una cuenta principal compartida, categoría y quién pagó.
 4. Pulsa **Guardar gasto** o **Guardar movimiento**.
 
-La cuenta y el bolsillo deben tener alcance compatible. El movimiento real va
-al libro Firefly correcto y OKLE guarda su atribución al bolsillo. En
-**Movimientos** puedes buscar, filtrar y corregir comercio o categoría sin
-reescribir el asiento contable original.
+El movimiento real va al libro compartido de Firefly. Los bolsillos no se
+descuentan automáticamente al registrar el gasto: primero se libera la reserva
+desde el bolsillo y luego se registra el retiro real desde la cuenta. Esto
+evita presentar una organización virtual como si fuera un movimiento bancario.
+En **Movimientos** puedes buscar, filtrar y corregir comercio o categoría sin
+reescribir el asiento contable original. El análisis del periodo muestra barras
+comparables por categoría y persona y se adapta a una sola columna en móvil.
 
 ### Si no hay internet
 
@@ -116,6 +123,22 @@ En **Bolsillos → Nuevo bolsillo**:
 **Aportar** reserva dinero dentro de OKLE; no crea una transferencia bancaria.
 También puedes mover la reserva entre bolsillos compatibles, pausar, editar o
 archivar.
+
+Usa la búsqueda para encontrar un bolsillo por nombre. En **Compartidos**
+puedes filtrar los tuyos o los de tu pareja; **Solo yo** contiene únicamente
+tus bolsillos privados.
+
+Cada bolsillo pertenece a quien lo creó:
+
+- ambos miembros pueden consultar un bolsillo compartido;
+- únicamente la persona creadora puede editarlo, aportar, liberar, mover,
+  vincular una cuenta, archivar o eliminar;
+- **Vincular cuenta** permite asignarlo a cualquiera de las cuentas de su
+  creador y conciliar reservas antiguas que todavía no tenían origen;
+- si un bolsillo se creó por error, su creador puede usar **Eliminar error**,
+  escribir el motivo y confirmar `ELIMINAR`. La operación elimina también el
+  saldo virtual solo cuando no existen gastos, pagos, inversiones o planes
+  reales relacionados. No crea ingresos ni movimientos bancarios ficticios.
 
 ### Pagos
 
@@ -171,6 +194,9 @@ Cada miembro configura sus propios dispositivos. En iPhone o iPad debes añadir
 primero la PWA a la pantalla de inicio. El texto de la pantalla bloqueada es
 genérico y no muestra cantidades, comercios ni nombres privados.
 
+La campana abre un panel contenido dentro de la pantalla. Puedes desplazarte
+dentro del panel y cerrarlo con el botón **Cerrar** sin perder la posición.
+
 ### TRM y automatización bancaria
 
 En **Más → TRM y automatización bancaria**, la persona propietaria puede:
@@ -198,4 +224,6 @@ a los datos. Protege el servidor, cifra las copias y usa **Más → Exportar y
 respaldar** para obtener una copia portable.
 
 La luna o el sol de la esquina superior derecha cambia el tema en cualquier
-pantalla.
+pantalla. En **Más → Apariencia** cada persona puede elegir un conjunto de
+colores o definir su color principal y de acento. El color y emoji de cada
+bolsillo también se editan de forma independiente por su creador.

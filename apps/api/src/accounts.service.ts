@@ -15,6 +15,7 @@ import { PrismaService } from "./prisma.service.js";
 
 const Appearance = z.object({
   ownerMemberId: z.string().min(1).nullable().optional(),
+  isPrimary: z.boolean().default(true),
   icon: z.string().trim().min(1).max(16).default("🏦"),
   color: z
     .string()
@@ -88,6 +89,7 @@ export class AccountsService {
         ownerName:
           owner?.displayName ??
           (account.scope === "household" ? "Hogar" : "Mi cuenta"),
+        isPrimary: profile?.isPrimary ?? true,
         icon: profile?.icon ?? "🏦",
         color: profile?.color ?? owner?.color ?? "#123C69",
         reservedAmount: reserved.toString(),
@@ -107,6 +109,7 @@ export class AccountsService {
     input: CreateFireflyAccountInput & {
       scope: LedgerScope;
       ownerMemberId?: string | null;
+      isPrimary?: boolean;
       icon?: string;
       color?: string;
     },
@@ -114,6 +117,7 @@ export class AccountsService {
   ) {
     const appearance = Appearance.parse({
       ownerMemberId: input.ownerMemberId,
+      isPrimary: input.isPrimary,
       icon: input.icon,
       color: input.color,
     });
@@ -140,11 +144,13 @@ export class AccountsService {
         ledgerScope: input.scope,
         fireflyAccountId: account.id,
         ownerMemberId,
+        isPrimary: appearance.isPrimary,
         icon: appearance.icon,
         color: appearance.color,
       },
       update: {
         ownerMemberId,
+        isPrimary: appearance.isPrimary,
         icon: appearance.icon,
         color: appearance.color,
       },
@@ -159,6 +165,7 @@ export class AccountsService {
       name?: string;
       currency?: string;
       ownerMemberId?: string | null;
+      isPrimary?: boolean;
       icon?: string;
       color?: string;
     },
@@ -176,6 +183,7 @@ export class AccountsService {
     );
     if (
       input.ownerMemberId !== undefined ||
+      input.isPrimary !== undefined ||
       input.icon !== undefined ||
       input.color !== undefined
     ) {
@@ -198,11 +206,15 @@ export class AccountsService {
           fireflyAccountId: id,
           ownerMemberId:
             ownerMemberId ?? (scope === "private" ? actor.memberId : null),
+          isPrimary: appearance.isPrimary ?? true,
           icon: appearance.icon ?? "🏦",
           color: appearance.color ?? "#123C69",
         },
         update: {
           ...(ownerMemberId !== undefined ? { ownerMemberId } : {}),
+          ...(appearance.isPrimary !== undefined
+            ? { isPrimary: appearance.isPrimary }
+            : {}),
           ...(appearance.icon !== undefined ? { icon: appearance.icon } : {}),
           ...(appearance.color !== undefined
             ? { color: appearance.color }
@@ -270,6 +282,64 @@ export class AccountsService {
         reservedAmount,
       ),
     };
+  }
+
+  async assertOwnedAccount(
+    id: string,
+    scope: LedgerScope,
+    ownerMemberId: string,
+    actor: Actor,
+  ) {
+    const account = await this.assertAccount(id, scope, actor);
+    if (scope === "private") {
+      if (ownerMemberId !== actor.memberId) throw new NotFoundException();
+      return account;
+    }
+    const profile = await this.prisma.accountProfile.findUnique({
+      where: {
+        householdId_ledgerScope_fireflyAccountId: {
+          householdId: actor.householdId,
+          ledgerScope: scope,
+          fireflyAccountId: id,
+        },
+      },
+      select: { ownerMemberId: true },
+    });
+    if (profile?.ownerMemberId !== ownerMemberId) {
+      throw new BadRequestException(
+        "El bolsillo solo puede vincularse a una cuenta a nombre de su creador",
+      );
+    }
+    return account;
+  }
+
+  async assertPrimaryExpenseAccount(
+    id: string,
+    scope: LedgerScope,
+    actor: Actor,
+  ) {
+    if (scope !== "household") {
+      throw new BadRequestException(
+        "Los gastos solo pueden registrarse desde cuentas principales compartidas",
+      );
+    }
+    const account = await this.assertAccount(id, scope, actor);
+    const profile = await this.prisma.accountProfile.findUnique({
+      where: {
+        householdId_ledgerScope_fireflyAccountId: {
+          householdId: actor.householdId,
+          ledgerScope: scope,
+          fireflyAccountId: id,
+        },
+      },
+      select: { isPrimary: true },
+    });
+    if (profile?.isPrimary === false) {
+      throw new BadRequestException(
+        "Selecciona una cuenta marcada como principal",
+      );
+    }
+    return account;
   }
 
   private async validateOwner(

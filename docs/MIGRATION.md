@@ -7,6 +7,32 @@ La aplicación soporta rutas de instalación configurables y dos topologías exp
 
 Para el servidor doméstico actual siga [DEPLOY_PRIVATE_TAILSCALE.md](DEPLOY_PRIVATE_TAILSCALE.md). Esta guía resume los invariantes comunes.
 
+## Migración 202607290001: propiedad de bolsillos y preferencias
+
+`202607290001_pocket_ownership_ui_preferences` es aditiva. Incorpora:
+
+- cuenta y libro predeterminados opcionales en cada bolsillo;
+- marca de cuenta principal para restringir el origen de los gastos manuales;
+- preferencias de apariencia y secciones de Inicio por miembro.
+
+No elimina bolsillos, saldos, movimientos ni migraciones anteriores. Los
+bolsillos históricos sin cuenta continúan como no conciliados hasta que su
+creador use **Vincular cuenta**. Las cuentas existentes permanecen principales
+por defecto para conservar el flujo histórico; cada persona puede ajustar esa
+marca en **Más → Cuentas y tarjetas**.
+
+Antes de actualizar, ejecute el backup habitual. Después use el procedimiento
+completo, que genera Prisma Client, aplica migraciones y espera los healthchecks:
+
+```bash
+git status --porcelain
+DEPLOY_TARGET=private scripts/update-server.sh
+```
+
+Valide con ambos miembros que un bolsillo compartido ajeno sea de solo lectura,
+que los gastos solo ofrezcan cuentas principales compartidas y que las
+preferencias visuales de una persona no alteren la interfaz de la otra.
+
 ## Migración 202607280002: flujo de caja real y calendario
 
 La migración `202607280002_real_cashflow_calendar_corrections` es aditiva. Crea

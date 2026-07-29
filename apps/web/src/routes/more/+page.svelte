@@ -13,6 +13,7 @@
   import PwaStatus from "$lib/PwaStatus.svelte";
   import NotificationSettings from "$lib/NotificationSettings.svelte";
   import IntegrationSettings from "$lib/IntegrationSettings.svelte";
+  import AppearanceSettings from "$lib/AppearanceSettings.svelte";
   import { onMount } from "svelte";
   let message = $state("");
   let error = $state("");
@@ -154,6 +155,7 @@
     </div>
   </section>
   <PwaStatus />
+  <AppearanceSettings />
   <NotificationSettings />
   <IntegrationSettings />
   <section class="panel section-block">

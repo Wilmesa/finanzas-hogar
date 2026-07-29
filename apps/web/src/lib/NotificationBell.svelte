@@ -63,7 +63,7 @@
   </button>
   {#if open}
     <section class="notification-panel" aria-label="Notificaciones">
-      <header><strong>Pendientes y avisos</strong><a href="/calendar">Calendario</a></header>
+      <header><strong>Pendientes y avisos</strong><span><a href="/calendar">Calendario</a><button class="icon-button" aria-label="Cerrar notificaciones" onclick={() => (open = false)}>×</button></span></header>
       {#each notifications.slice(0, 10) as notification}
         <a
           class:unread={notification.status === "unread"}

@@ -2354,6 +2354,337 @@ textarea:focus {
   }
 }
 
+/* Preferencias visuales por usuario */
+:root {
+  --user-primary: #123c69;
+  --user-on-primary: #ffffff;
+  --user-accent: #b9862e;
+  --user-on-accent: #ffffff;
+}
+.nav-shell,
+.primary-button,
+.view-tabs button.active {
+  background: var(--user-primary);
+  color: var(--user-on-primary);
+}
+.fab {
+  background: var(--user-accent);
+  color: var(--user-on-accent);
+}
+@media (max-width: 960px) {
+  .nav-shell {
+    background: color-mix(in srgb, var(--user-primary) 96%, transparent);
+  }
+}
+
+/* Inicio personalizable y totales de bolsillos por creador */
+.dashboard-controls {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.dashboard-controls .filter-tabs {
+  margin: 0;
+}
+.compact-button {
+  width: auto;
+  min-height: 42px;
+}
+.dashboard-customizer {
+  margin-bottom: 20px;
+}
+.dashboard-customizer > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dashboard-customizer > header h2 {
+  margin: 4px 0 0;
+}
+.dashboard-customizer > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  margin: 16px 0 10px;
+}
+.dashboard-customizer label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
+.dashboard-customizer input {
+  width: 18px;
+  min-height: 18px;
+}
+.member-pocket-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.member-pocket-totals article {
+  display: grid;
+  gap: 5px;
+  border-top: 5px solid var(--member-color);
+}
+.member-pocket-totals article > span,
+.member-pocket-totals article > small {
+  color: var(--muted);
+}
+.member-pocket-totals article > strong {
+  font-size: clamp(1.35rem, 4vw, 2rem);
+  font-variant-numeric: tabular-nums;
+}
+.recent-home,
+.home-next-income {
+  margin-bottom: 20px;
+}
+
+/* Filtros y propiedad de bolsillos */
+.pocket-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 14px;
+}
+.pocket-search {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.pocket-search > span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+.pocket-search input {
+  width: 100%;
+}
+.owner-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.owner-filter button {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--muted);
+  font-weight: 750;
+}
+.owner-filter button.active {
+  border-color: var(--user-primary);
+  background: color-mix(in srgb, var(--user-primary) 12%, var(--paper));
+  color: var(--ink);
+}
+.pocket-owner-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 5px 12px;
+  margin: 8px 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.read-only-pocket {
+  margin: 10px 12px 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Gráficas responsive del análisis de movimientos */
+.source-analysis {
+  display: block;
+  min-width: 0;
+}
+.analysis-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.analysis-heading > strong {
+  font-size: clamp(1.25rem, 3vw, 1.8rem);
+  white-space: nowrap;
+}
+.source-bars {
+  min-width: 0;
+}
+.source-bars > .analysis-bar {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 9px 0;
+  background: transparent;
+}
+.analysis-bar > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.analysis-bar > span b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.analysis-bar > span small {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.analysis-bar > div {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--mint);
+}
+.analysis-bar > div i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--user-primary);
+}
+.analysis-bar.member-bar > div i {
+  background: var(--user-accent);
+}
+
+/* Selector de apariencia */
+.appearance-settings {
+  margin: 1rem 0;
+}
+.appearance-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.appearance-presets button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  min-height: 42px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.appearance-presets button i {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: var(--preset-primary);
+}
+.appearance-presets button i + i {
+  margin-left: -6px;
+  margin-right: 7px;
+  background: var(--preset-accent);
+}
+.appearance-colors {
+  align-items: end;
+}
+.appearance-colors input[type="color"] {
+  width: 100%;
+  padding: 4px;
+}
+.appearance-settings > small {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+}
+
+/* La bandeja de avisos siempre queda dentro del viewport */
+.notification-shell {
+  right: max(76px, calc(env(safe-area-inset-right) + 76px));
+}
+.notification-panel {
+  position: fixed;
+  top: max(70px, calc(env(safe-area-inset-top) + 56px));
+  right: max(12px, env(safe-area-inset-right));
+  width: min(380px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - max(86px, calc(env(safe-area-inset-top) + 72px)));
+  overscroll-behavior: contain;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.notification-panel header > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.notification-panel header .icon-button {
+  width: 34px;
+  min-height: 34px;
+}
+.notification-panel > a,
+.notification-panel > a > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+@media (max-width: 620px) {
+  .dashboard-controls,
+  .analysis-heading,
+  .pocket-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .dashboard-controls .filter-tabs,
+  .compact-button {
+    width: 100%;
+  }
+  .dashboard-controls .filter-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .member-pocket-totals,
+  .analysis-pairs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .analysis-heading > strong {
+    white-space: normal;
+  }
+  .pocket-toolbar {
+    padding: 12px;
+  }
+  .owner-filter {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .owner-filter button {
+    width: 100%;
+  }
+  .appearance-colors {
+    grid-template-columns: 1fr;
+  }
+  .notification-panel {
+    top: max(68px, calc(env(safe-area-inset-top) + 54px));
+    right: max(10px, env(safe-area-inset-right));
+    left: max(10px, env(safe-area-inset-left));
+    width: auto;
+    max-width: none;
+    max-height: calc(
+      100dvh - max(84px, calc(env(safe-area-inset-top) + 70px)) -
+        env(safe-area-inset-bottom)
+    );
+    border-radius: 14px;
+  }
+}
+
 /* Saldos reales y reservas trazables */
 .account-balance-section {
   margin-top: 18px;
@@ -2941,5 +3272,58 @@ h3,
   .shortcut-grid,
   .news-stream {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Overrides finales: color personal y bandeja contenida en el viewport. */
+.nav-shell,
+.primary-button,
+.view-tabs button.active {
+  background: var(--user-primary);
+  color: var(--user-on-primary);
+}
+.notification-shell {
+  right: max(76px, calc(env(safe-area-inset-right) + 76px));
+}
+.notification-panel {
+  position: fixed;
+  top: max(70px, calc(env(safe-area-inset-top) + 56px));
+  right: max(12px, env(safe-area-inset-right));
+  width: min(380px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - max(86px, calc(env(safe-area-inset-top) + 72px)));
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.notification-panel > a,
+.notification-panel > a > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.analysis-pairs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  min-width: 0;
+}
+@media (max-width: 960px) {
+  .nav-shell {
+    background: color-mix(in srgb, var(--user-primary) 96%, transparent);
+  }
+}
+@media (max-width: 620px) {
+  .analysis-pairs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .notification-panel {
+    top: max(68px, calc(env(safe-area-inset-top) + 54px));
+    right: max(10px, env(safe-area-inset-right));
+    left: max(10px, env(safe-area-inset-left));
+    width: auto;
+    max-width: none;
+    max-height: calc(
+      100dvh - max(84px, calc(env(safe-area-inset-top) + 70px)) -
+        env(safe-area-inset-bottom)
+    );
   }
 }

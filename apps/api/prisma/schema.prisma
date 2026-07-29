@@ -140,6 +140,7 @@ model Member {
   role               String                   @default("member")
   avatar             String?
   color              String                   @default("#059669")
+  uiPreferences      Json?
   createdAt          DateTime                 @default(now())
   household          Household                @relation(fields: [householdId], references: [id], onDelete: Cascade)
   pockets            Pocket[]                 @relation("PocketOwner")
@@ -254,6 +255,8 @@ model Pocket {
   currency           String
   policy             Json
   currentAmount      Decimal                  @default(0) @db.Decimal(30, 8)
+  defaultAccountId   String?
+  defaultLedgerScope LedgerScope?
   rolloverPolicy     String                   @default("carry_balance")
   status             PocketStatus             @default(active)
   version            Int                      @default(1)
@@ -271,6 +274,7 @@ model Pocket {
 
   @@index([householdId, visibility, status])
   @@index([ownerMemberId, visibility])
+  @@index([householdId, defaultLedgerScope, defaultAccountId])
 }
 
 model PocketEvent {
@@ -660,6 +664,7 @@ model AccountProfile {
   fireflyAccountId String
   ledgerScope      LedgerScope
   ownerMemberId    String?
+  isPrimary        Boolean     @default(true)
   icon             String      @default("🏦")
   color            String      @default("#123C69")
   createdAt        DateTime    @default(now())
