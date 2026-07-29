@@ -24,6 +24,7 @@ export interface CreateTransactionInput {
   occurredAt: string;
   fundingSourceScope?: "household" | "private";
   payerMemberId?: string;
+  spendingNature?: "household" | "personal";
 }
 
 export interface TransactionIngestionContext {
@@ -39,6 +40,7 @@ const TransactionPatch = z
   .object({
     merchant: z.string().trim().min(1).max(255).optional(),
     category: z.string().trim().min(1).max(100).nullable().optional(),
+    spendingNature: z.enum(["household", "personal"]).optional(),
   })
   .refine(
     (value) => Object.keys(value).length > 0,
@@ -54,27 +56,58 @@ export class TransactionsService {
   ) {}
 
   async list(actor: Actor) {
-    const transactions = await this.prisma.transactionAttribution.findMany({
-      where: {
-        householdId: actor.householdId,
-        OR: [
-          { ledgerScope: "household" },
-          { ledgerScope: "private", payerMemberId: actor.memberId },
-        ],
-      },
-      orderBy: { occurredAt: "desc" },
-      take: 200,
-      include: {
-        payer: { select: { id: true, displayName: true, color: true } },
-      },
-    });
+    const [transactions, reversalAudits] = await Promise.all([
+      this.prisma.transactionAttribution.findMany({
+        where: {
+          householdId: actor.householdId,
+          OR: [
+            { ledgerScope: "household" },
+            { ledgerScope: "private", payerMemberId: actor.memberId },
+          ],
+        },
+        orderBy: { occurredAt: "desc" },
+        take: 200,
+        include: {
+          payer: { select: { id: true, displayName: true, color: true } },
+        },
+      }),
+      this.prisma.auditLog.findMany({
+        where: {
+          householdId: actor.householdId,
+          entityType: "TransactionAttribution",
+          action: "reversed",
+        },
+        select: { entityId: true, after: true },
+      }),
+    ]);
+    const reversedIds = new Set(reversalAudits.map((audit) => audit.entityId));
+    const reversalIds = new Set(
+      reversalAudits.flatMap((audit) => {
+        const after = audit.after as { reversalId?: unknown } | null;
+        return typeof after?.reversalId === "string" ? [after.reversalId] : [];
+      }),
+    );
     return transactions.map((transaction) => {
+      const correctionAllowedUntil = new Date(
+        transaction.occurredAt.getTime() + 7 * 24 * 60 * 60 * 1000,
+      );
+      const correctionState = {
+        correctionAllowedUntil,
+        canCorrect: correctionAllowedUntil.getTime() >= Date.now(),
+        canReverse:
+          correctionAllowedUntil.getTime() >= Date.now() &&
+          transaction.syncStatus === "synchronized" &&
+          !reversedIds.has(transaction.id) &&
+          !reversalIds.has(transaction.id),
+        reversed: reversedIds.has(transaction.id),
+        isReversal: reversalIds.has(transaction.id),
+      };
       if (
         transaction.ledgerScope !== "private" ||
         transaction.payerMemberId !== actor.memberId ||
         !transaction.privateMetadataCiphertext
       ) {
-        return transaction;
+        return { ...transaction, ...correctionState };
       }
       const metadata = this.privateMetadata.open<{
         merchant?: string;
@@ -85,6 +118,7 @@ export class TransactionsService {
         merchant: metadata.merchant ?? transaction.merchant,
         category: metadata.category ?? transaction.category,
         privateMetadataCiphertext: undefined,
+        ...correctionState,
       };
     });
   }
@@ -173,7 +207,9 @@ export class TransactionsService {
       throw new NotFoundException();
     const scope =
       ingestion?.ledgerScope ??
-      (pocket?.visibility === "private" ? "private" : "household");
+      (pocket?.visibility === "private"
+        ? "private"
+        : (input.fundingSourceScope ?? "household"));
     const payerMemberId = input.payerMemberId ?? actor.memberId;
     if (scope === "private" && payerMemberId !== actor.memberId) {
       throw new BadRequestException(
@@ -225,6 +261,9 @@ export class TransactionsService {
         merchant: scope === "private" ? "Consumo Personal" : input.description,
         amount: new Prisma.Decimal(input.amount),
         transactionType: input.type,
+        spendingNature: input.spendingNature ?? "household",
+        sourceAccountId: input.sourceId ?? null,
+        destinationAccountId: input.destinationId ?? null,
         currency: input.currency.toUpperCase(),
         occurredAt: new Date(input.occurredAt),
         idempotencyKey,
@@ -345,42 +384,29 @@ export class TransactionsService {
             lastSyncAttemptAt: new Date(),
           },
         });
-        if (pocket) {
-          const eventType =
-            input.type === "withdrawal"
-              ? "spent"
-              : input.type === "deposit"
-                ? "allocated"
-                : "adjusted";
-          await tx.pocketEvent.create({
-            data: {
-              householdId: actor.householdId,
-              pocketId: pocket.id,
-              actorMemberId: actor.memberId,
-              type: eventType,
-              amount: new Prisma.Decimal(input.amount),
-              currency: input.currency.toUpperCase(),
-              planningOnly: false,
-              fireflyTransactionId: fireflyResult.data.id,
-              idempotencyKey,
-              ...(ingestion?.appliedRuleId
-                ? {
-                    metadata: {
-                      transactionRuleId: ingestion.appliedRuleId,
-                    },
-                  }
-                : {}),
+        if (input.sourceId && fireflyScope === "household") {
+          const accountProfile = await tx.accountProfile.findUnique({
+            where: {
+              householdId_ledgerScope_fireflyAccountId: {
+                householdId: actor.householdId,
+                ledgerScope: "household",
+                fireflyAccountId: input.sourceId,
+              },
             },
           });
-          if (input.type !== "transfer") {
-            await tx.pocket.update({
-              where: { id: pocket.id },
+          if (
+            accountProfile?.ownerMemberId &&
+            accountProfile.ownerMemberId !== actor.memberId
+          ) {
+            await tx.appNotification.create({
               data: {
-                currentAmount:
-                  input.type === "withdrawal"
-                    ? { decrement: new Prisma.Decimal(input.amount) }
-                    : { increment: new Prisma.Decimal(input.amount) },
-                version: { increment: 1 },
+                householdId: actor.householdId,
+                recipientMemberId: accountProfile.ownerMemberId,
+                type: "partner_account_spending",
+                title: "Movimiento en una cuenta a tu nombre",
+                message: `${input.amount} ${input.currency.toUpperCase()} fueron registrados por otro miembro del hogar`,
+                entityType: "TransactionAttribution",
+                entityId: attribution.id,
               },
             });
           }
@@ -429,6 +455,14 @@ export class TransactionsService {
       },
     });
     if (!existing) throw new NotFoundException();
+    const correctionAllowedUntil = new Date(
+      existing.occurredAt.getTime() + 7 * 24 * 60 * 60 * 1000,
+    );
+    if (correctionAllowedUntil.getTime() < Date.now()) {
+      throw new BadRequestException(
+        "El plazo de corrección de siete días ya terminó",
+      );
+    }
     const priorPrivateMetadata =
       existing.privateMetadataCiphertext &&
       existing.ledgerScope === "private" &&
@@ -463,6 +497,9 @@ export class TransactionsService {
         existing.ledgerScope !== "private"
           ? { category: parsed.data.category }
           : {}),
+        ...(parsed.data.spendingNature !== undefined
+          ? { spendingNature: parsed.data.spendingNature }
+          : {}),
         ...(privateMetadata
           ? { privateMetadataCiphertext: privateMetadata }
           : {}),
@@ -483,6 +520,129 @@ export class TransactionsService {
       },
     });
     return updated;
+  }
+
+  async reverse(id: string, idempotencyKey: string, actor: Actor) {
+    if (!idempotencyKey) {
+      throw new BadRequestException("Idempotency-Key es obligatorio");
+    }
+    const existing = await this.prisma.transactionAttribution.findFirst({
+      where: {
+        id,
+        householdId: actor.householdId,
+        OR: [
+          { ledgerScope: "household" },
+          { ledgerScope: "private", payerMemberId: actor.memberId },
+        ],
+      },
+    });
+    if (!existing) throw new NotFoundException();
+    const deadline = existing.occurredAt.getTime() + 7 * 24 * 60 * 60 * 1000;
+    if (deadline < Date.now()) {
+      throw new BadRequestException(
+        "El plazo de siete días para revertir este movimiento terminó",
+      );
+    }
+    if (existing.syncStatus !== "synchronized") {
+      throw new BadRequestException(
+        "Solo se puede revertir un movimiento sincronizado",
+      );
+    }
+    const previousReversal = await this.prisma.auditLog.findFirst({
+      where: {
+        householdId: actor.householdId,
+        entityType: "TransactionAttribution",
+        entityId: existing.id,
+        action: "reversed",
+      },
+    });
+    if (previousReversal) {
+      const after = previousReversal.after as {
+        reversalId?: unknown;
+      } | null;
+      return {
+        originalId: existing.id,
+        reversalId:
+          typeof after?.reversalId === "string" ? after.reversalId : null,
+        replayed: true,
+      };
+    }
+
+    const type =
+      existing.transactionType === "withdrawal"
+        ? "deposit"
+        : existing.transactionType === "deposit"
+          ? "withdrawal"
+          : existing.transactionType === "transfer"
+            ? "transfer"
+            : null;
+    if (!type) {
+      throw new BadRequestException(
+        "El tipo de movimiento no admite reversión automática",
+      );
+    }
+    const sourceId =
+      type === "withdrawal"
+        ? (existing.destinationAccountId ?? undefined)
+        : type === "transfer"
+          ? (existing.destinationAccountId ?? undefined)
+          : undefined;
+    const destinationId =
+      type === "deposit"
+        ? (existing.sourceAccountId ?? undefined)
+        : type === "transfer"
+          ? (existing.sourceAccountId ?? undefined)
+          : undefined;
+    if (
+      (type === "withdrawal" && !sourceId) ||
+      (type === "deposit" && !destinationId) ||
+      (type === "transfer" && (!sourceId || !destinationId))
+    ) {
+      throw new BadRequestException(
+        "El movimiento original no conserva cuentas suficientes para revertirlo",
+      );
+    }
+
+    const reversal = await this.create(
+      {
+        type,
+        amount: existing.amount.toString(),
+        currency: existing.currency,
+        description: `Reversión: ${existing.merchant ?? "movimiento"}`,
+        ...(sourceId ? { sourceId } : {}),
+        ...(destinationId ? { destinationId } : {}),
+        ...(existing.category ? { category: existing.category } : {}),
+        occurredAt: new Date().toISOString(),
+        fundingSourceScope: existing.ledgerScope,
+        payerMemberId: existing.payerMemberId,
+        spendingNature: existing.spendingNature,
+      },
+      `reversal:${existing.id}`,
+      actor,
+    );
+    await this.prisma.auditLog.create({
+      data: {
+        householdId: actor.householdId,
+        actorMemberId: actor.memberId,
+        entityType: "TransactionAttribution",
+        entityId: existing.id,
+        action: "reversed",
+        before: {
+          transactionType: existing.transactionType,
+          amount: existing.amount.toString(),
+          currency: existing.currency,
+        },
+        after: {
+          reversalId: reversal?.id ?? null,
+          commandIdempotencyKey: idempotencyKey,
+        },
+      },
+    });
+    return {
+      originalId: existing.id,
+      reversalId: reversal?.id ?? null,
+      replayed: false,
+    };
   }
 
   async review(id: string, raw: unknown, idempotencyKey: string, actor: Actor) {
@@ -549,85 +709,6 @@ export class TransactionsService {
           })
         : null;
     return this.prisma.$transaction(async (tx) => {
-      if (
-        parsed.data.pocketId !== undefined &&
-        existing.pocketId !== parsed.data.pocketId
-      ) {
-        const priorEvent = await tx.pocketEvent.findFirst({
-          where: {
-            householdId: actor.householdId,
-            fireflyTransactionId: existing.fireflyTransactionId,
-            ...(existing.pocketId ? { pocketId: existing.pocketId } : {}),
-            type:
-              existing.transactionType === "deposit" ? "allocated" : "spent",
-          },
-        });
-        if (priorEvent && existing.pocketId) {
-          await tx.pocketEvent.create({
-            data: {
-              householdId: actor.householdId,
-              pocketId: existing.pocketId,
-              actorMemberId: actor.memberId,
-              type: "adjusted",
-              amount: existing.amount,
-              currency: existing.currency,
-              planningOnly: false,
-              fireflyTransactionId: existing.fireflyTransactionId,
-              idempotencyKey: `${idempotencyKey}:reverse:${existing.pocketId}`,
-              metadata: {
-                reviewAttributionId: existing.id,
-                reversesPocketEventId: priorEvent.id,
-                direction:
-                  existing.transactionType === "deposit"
-                    ? "decrement"
-                    : "increment",
-              },
-            },
-          });
-          await tx.pocket.update({
-            where: { id: existing.pocketId },
-            data: {
-              currentAmount:
-                existing.transactionType === "deposit"
-                  ? { decrement: existing.amount }
-                  : { increment: existing.amount },
-              version: { increment: 1 },
-            },
-          });
-        }
-        if (pocket) {
-          await tx.pocketEvent.create({
-            data: {
-              householdId: actor.householdId,
-              pocketId: pocket.id,
-              actorMemberId: actor.memberId,
-              type:
-                existing.transactionType === "deposit" ? "allocated" : "spent",
-              amount: existing.amount,
-              currency: existing.currency,
-              planningOnly: false,
-              fireflyTransactionId: existing.fireflyTransactionId,
-              idempotencyKey: `${idempotencyKey}:assign:${pocket.id}`,
-              metadata: {
-                reviewAttributionId: existing.id,
-                previousPocketId: existing.pocketId,
-              },
-            },
-          });
-          if (existing.transactionType !== "transfer") {
-            await tx.pocket.update({
-              where: { id: pocket.id },
-              data: {
-                currentAmount:
-                  existing.transactionType === "deposit"
-                    ? { increment: existing.amount }
-                    : { decrement: existing.amount },
-                version: { increment: 1 },
-              },
-            });
-          }
-        }
-      }
       const updated = await tx.transactionAttribution.update({
         where: { id: existing.id },
         data: {

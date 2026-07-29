@@ -14,21 +14,53 @@ import {
 } from "@finanzas/domain";
 import { Decimal } from "decimal.js";
 import type { Actor } from "./auth.js";
+import { AccountsService } from "./accounts.service.js";
+import type { LedgerScope } from "./firefly.client.js";
 import { PrismaService } from "./prisma.service.js";
 
 @Injectable()
 export class PocketsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accounts: AccountsService,
+  ) {}
 
-  list(actor: Actor) {
-    return this.prisma.pocket.findMany({
+  async list(actor: Actor) {
+    const pockets = await this.prisma.pocket.findMany({
       where: {
         householdId: actor.householdId,
         OR: [{ visibility: "household" }, { ownerMemberId: actor.memberId }],
         status: { not: "archived" },
       },
       orderBy: [{ visibility: "asc" }, { createdAt: "desc" }],
+      include: {
+        fundingLots: {
+          where: { remainingAmount: { gt: 0 } },
+          select: {
+            id: true,
+            sourceAccountId: true,
+            sourceLedgerScope: true,
+            contributorMemberId: true,
+            remainingAmount: true,
+            currency: true,
+            origin: true,
+            reason: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "asc" },
+        },
+      },
     });
+    return pockets.map((pocket) => ({
+      ...pocket,
+      unreconciledAmount: pocket.fundingLots
+        .filter((lot) => !lot.sourceAccountId)
+        .reduce(
+          (sum, lot) => sum.plus(lot.remainingAmount),
+          new Prisma.Decimal(0),
+        )
+        .toString(),
+    }));
   }
 
   async find(id: string, actor: Actor) {
@@ -54,19 +86,58 @@ export class PocketsService {
 
   create(raw: unknown, actor: Actor) {
     const input = this.parseCreate(raw);
-    return this.prisma.pocket.create({
-      data: {
-        householdId: actor.householdId,
-        ownerMemberId: actor.memberId,
-        visibility: input.visibility,
-        purpose: input.purpose,
-        name: input.name,
-        notes: input.notes || null,
-        currency: input.currency,
-        policy: input.policy as Prisma.InputJsonValue,
-        currentAmount: new Prisma.Decimal(input.currentAmount),
-        rolloverPolicy: input.rolloverPolicy,
-      },
+    const initialAmount = new Prisma.Decimal(input.currentAmount);
+    if (initialAmount.greaterThan(0) && !input.initialBalanceReason) {
+      throw new BadRequestException(
+        "Explica el origen del saldo inicial para conservar la trazabilidad",
+      );
+    }
+    const initialBalanceReason = input.initialBalanceReason ?? null;
+    return this.prisma.$transaction(async (tx) => {
+      const pocket = await tx.pocket.create({
+        data: {
+          householdId: actor.householdId,
+          ownerMemberId: actor.memberId,
+          visibility: input.visibility,
+          purpose: input.purpose,
+          name: input.name,
+          notes: input.notes || null,
+          icon: input.icon,
+          color: input.color,
+          currency: input.currency,
+          policy: input.policy as Prisma.InputJsonValue,
+          currentAmount: initialAmount,
+          rolloverPolicy: input.rolloverPolicy,
+        },
+      });
+      if (initialAmount.greaterThan(0)) {
+        await tx.pocketFundingLot.create({
+          data: {
+            householdId: actor.householdId,
+            pocketId: pocket.id,
+            contributorMemberId: actor.memberId,
+            originalAmount: initialAmount,
+            remainingAmount: initialAmount,
+            currency: pocket.currency,
+            origin: "initial_adjustment",
+            reason: initialBalanceReason,
+          },
+        });
+        await tx.pocketEvent.create({
+          data: {
+            householdId: actor.householdId,
+            pocketId: pocket.id,
+            actorMemberId: actor.memberId,
+            type: "adjusted",
+            amount: initialAmount,
+            currency: pocket.currency,
+            planningOnly: true,
+            correctionReason: initialBalanceReason,
+            idempotencyKey: `pocket-created:${pocket.id}`,
+          },
+        });
+      }
+      return pocket;
     });
   }
 
@@ -93,6 +164,8 @@ export class PocketsService {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.purpose !== undefined ? { purpose: input.purpose } : {}),
         ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
+        ...(input.icon !== undefined ? { icon: input.icon } : {}),
+        ...(input.color !== undefined ? { color: input.color } : {}),
         ...(input.visibility !== undefined
           ? { visibility: input.visibility }
           : {}),
@@ -158,6 +231,12 @@ export class PocketsService {
     try {
       return await this.prisma.$transaction(async (tx) => {
         if (hasBalance && raw.disposition === "transfer" && destination) {
+          await this.moveFundingLots(
+            tx,
+            pocket.id,
+            destination.id,
+            pocket.currentAmount,
+          );
           await tx.pocketEvent.createMany({
             data: [
               {
@@ -192,6 +271,10 @@ export class PocketsService {
             },
           });
         } else if (hasBalance && raw.disposition === "release") {
+          await tx.pocketFundingLot.updateMany({
+            where: { pocketId: pocket.id, remainingAmount: { gt: 0 } },
+            data: { remainingAmount: new Prisma.Decimal(0) },
+          });
           await tx.pocketEvent.create({
             data: {
               householdId: actor.householdId,
@@ -263,7 +346,13 @@ export class PocketsService {
 
   async allocate(
     id: string,
-    raw: { amount?: string },
+    raw: {
+      amount?: string;
+      sourceAccountId?: string;
+      sourceLedgerScope?: LedgerScope;
+      mode?: "account" | "initial_adjustment" | "correction";
+      reason?: string;
+    },
     idempotencyKey: string,
     actor: Actor,
   ) {
@@ -271,6 +360,39 @@ export class PocketsService {
     if (!amount.isPositive())
       throw new ConflictException("El aporte debe ser mayor que cero");
     const pocket = await this.find(id, actor);
+    const mode = raw.mode ?? "account";
+    const reason = raw.reason?.trim();
+    let sourceAccountId: string | null = null;
+    let sourceLedgerScope: LedgerScope | null = null;
+    if (mode === "account") {
+      if (!raw.sourceAccountId || !raw.sourceLedgerScope) {
+        throw new BadRequestException(
+          "Selecciona la cuenta real de donde sale el dinero",
+        );
+      }
+      const availability = await this.accounts.availableForAllocation(
+        raw.sourceAccountId,
+        raw.sourceLedgerScope,
+        actor,
+      );
+      if (availability.account.currency !== pocket.currency) {
+        throw new BadRequestException(
+          "La cuenta y el bolsillo deben usar la misma moneda",
+        );
+      }
+      if (amount.greaterThan(availability.availableAmount.toString())) {
+        throw new BadRequestException(
+          `La cuenta solo tiene ${availability.availableAmount.toString()} ${pocket.currency} disponibles para asignar`,
+        );
+      }
+      sourceAccountId = raw.sourceAccountId;
+      sourceLedgerScope = raw.sourceLedgerScope;
+    } else if (!reason || reason.length < 3) {
+      throw new BadRequestException(
+        "El saldo inicial o la corrección requieren un motivo",
+      );
+    }
+    const correctionReason = mode === "account" ? null : (reason ?? null);
     try {
       return await this.prisma.$transaction(async (tx) => {
         const event = await tx.pocketEvent.create({
@@ -282,13 +404,145 @@ export class PocketsService {
             amount: new Prisma.Decimal(amount.toString()),
             currency: pocket.currency,
             planningOnly: true,
+            sourceAccountId,
+            sourceLedgerScope,
+            correctionReason,
             idempotencyKey,
+          },
+        });
+        await tx.pocketFundingLot.create({
+          data: {
+            householdId: actor.householdId,
+            pocketId: pocket.id,
+            sourceAccountId,
+            sourceLedgerScope,
+            contributorMemberId: actor.memberId,
+            originalAmount: new Prisma.Decimal(amount.toString()),
+            remainingAmount: new Prisma.Decimal(amount.toString()),
+            currency: pocket.currency,
+            origin: mode,
+            reason: correctionReason,
           },
         });
         const updated = await tx.pocket.update({
           where: { id: pocket.id },
           data: {
             currentAmount: { increment: new Prisma.Decimal(amount.toString()) },
+            version: { increment: 1 },
+          },
+        });
+        if (sourceAccountId && sourceLedgerScope === "household") {
+          const profile = await tx.accountProfile.findUnique({
+            where: {
+              householdId_ledgerScope_fireflyAccountId: {
+                householdId: actor.householdId,
+                ledgerScope: sourceLedgerScope,
+                fireflyAccountId: sourceAccountId,
+              },
+            },
+          });
+          if (
+            profile?.ownerMemberId &&
+            profile.ownerMemberId !== actor.memberId
+          ) {
+            await tx.appNotification.create({
+              data: {
+                householdId: actor.householdId,
+                recipientMemberId: profile.ownerMemberId,
+                type: "partner_account_allocation",
+                title: "Movimiento en una cuenta a tu nombre",
+                message: `${amount.toString()} ${pocket.currency} fueron asignados por otro miembro del hogar`,
+                entityType: "PocketEvent",
+                entityId: event.id,
+              },
+            });
+          }
+        }
+        return { event, pocket: updated };
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new ConflictException("Esta operación ya fue procesada");
+      }
+      throw error;
+    }
+  }
+
+  async release(
+    id: string,
+    raw: {
+      amount?: string;
+      targetAccountId?: string;
+      targetLedgerScope?: LedgerScope;
+    },
+    idempotencyKey: string,
+    actor: Actor,
+  ) {
+    if (!idempotencyKey) {
+      throw new BadRequestException("Idempotency-Key es obligatorio");
+    }
+    const amount = new Prisma.Decimal(raw.amount ?? 0);
+    if (!amount.greaterThan(0)) {
+      throw new BadRequestException("La cantidad debe ser mayor que cero");
+    }
+    if (!raw.targetAccountId || !raw.targetLedgerScope) {
+      throw new BadRequestException(
+        "Selecciona la cuenta a la que regresa la disponibilidad",
+      );
+    }
+    const pocket = await this.find(id, actor);
+    if (amount.greaterThan(pocket.currentAmount)) {
+      throw new BadRequestException("El bolsillo no tiene saldo suficiente");
+    }
+    await this.accounts.assertAccount(
+      raw.targetAccountId,
+      raw.targetLedgerScope,
+      actor,
+    );
+    const targetAccountId = raw.targetAccountId;
+    const targetLedgerScope = raw.targetLedgerScope;
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const lots = await tx.pocketFundingLot.findMany({
+          where: {
+            pocketId: pocket.id,
+            sourceAccountId: targetAccountId,
+            sourceLedgerScope: targetLedgerScope,
+            remainingAmount: { gt: 0 },
+          },
+          orderBy: { createdAt: "asc" },
+        });
+        const traceable = lots.reduce(
+          (sum, lot) => sum.plus(lot.remainingAmount),
+          new Prisma.Decimal(0),
+        );
+        if (amount.greaterThan(traceable)) {
+          throw new BadRequestException(
+            "Ese monto no fue financiado por la cuenta seleccionada. Revisa el origen o concilia el saldo inicial",
+          );
+        }
+        await this.consumeLots(tx, lots, amount);
+        const event = await tx.pocketEvent.create({
+          data: {
+            householdId: actor.householdId,
+            pocketId: pocket.id,
+            actorMemberId: actor.memberId,
+            type: "released",
+            amount,
+            currency: pocket.currency,
+            planningOnly: true,
+            sourceAccountId: targetAccountId,
+            sourceLedgerScope: targetLedgerScope,
+            idempotencyKey,
+          },
+        });
+        const updated = await tx.pocket.update({
+          where: { id: pocket.id },
+          data: {
+            currentAmount: { decrement: amount },
             version: { increment: 1 },
           },
         });
@@ -302,6 +556,23 @@ export class PocketsService {
         throw new ConflictException("Esta operación ya fue procesada");
       }
       throw error;
+    }
+  }
+
+  private async consumeLots(
+    tx: Prisma.TransactionClient,
+    lots: Array<{ id: string; remainingAmount: Prisma.Decimal }>,
+    requested: Prisma.Decimal,
+  ) {
+    let remaining = requested;
+    for (const lot of lots) {
+      if (!remaining.greaterThan(0)) break;
+      const consumed = Prisma.Decimal.min(remaining, lot.remainingAmount);
+      await tx.pocketFundingLot.update({
+        where: { id: lot.id },
+        data: { remainingAmount: { decrement: consumed } },
+      });
+      remaining = remaining.minus(consumed);
     }
   }
 
@@ -342,6 +613,12 @@ export class PocketsService {
     }
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await this.moveFundingLots(
+          tx,
+          source.id,
+          destination.id,
+          new Prisma.Decimal(amount.toString()),
+        );
         const events = await Promise.all([
           tx.pocketEvent.create({
             data: {
@@ -415,6 +692,51 @@ export class PocketsService {
         }
       }
       throw error;
+    }
+  }
+
+  private async moveFundingLots(
+    tx: Prisma.TransactionClient,
+    sourcePocketId: string,
+    destinationPocketId: string,
+    requested: Prisma.Decimal,
+  ) {
+    const lots = await tx.pocketFundingLot.findMany({
+      where: { pocketId: sourcePocketId, remainingAmount: { gt: 0 } },
+      orderBy: { createdAt: "asc" },
+    });
+    const traceable = lots.reduce(
+      (sum, lot) => sum.plus(lot.remainingAmount),
+      new Prisma.Decimal(0),
+    );
+    if (requested.greaterThan(traceable)) {
+      throw new BadRequestException(
+        "El saldo debe conciliarse antes de moverlo a otro bolsillo",
+      );
+    }
+    let remaining = requested;
+    for (const lot of lots) {
+      if (!remaining.greaterThan(0)) break;
+      const moved = Prisma.Decimal.min(remaining, lot.remainingAmount);
+      await tx.pocketFundingLot.update({
+        where: { id: lot.id },
+        data: { remainingAmount: { decrement: moved } },
+      });
+      await tx.pocketFundingLot.create({
+        data: {
+          householdId: lot.householdId,
+          pocketId: destinationPocketId,
+          sourceAccountId: lot.sourceAccountId,
+          sourceLedgerScope: lot.sourceLedgerScope,
+          contributorMemberId: lot.contributorMemberId,
+          originalAmount: moved,
+          remainingAmount: moved,
+          currency: lot.currency,
+          origin: "pocket_transfer",
+          reason: `Transferido desde el bolsillo ${sourcePocketId}`,
+        },
+      });
+      remaining = remaining.minus(moved);
     }
   }
 }

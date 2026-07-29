@@ -30,29 +30,29 @@ const defaultCategories: CategoryView[] = [
   {
     id: "category-market",
     name: "Mercado",
-    icon: "shopping-cart",
+    icon: "🛒",
     color: "#123C69",
   },
   {
     id: "category-transport",
     name: "Transporte",
-    icon: "bus",
+    icon: "🚌",
     color: "#4C8DFF",
   },
   {
     id: "category-restaurants",
     name: "Restaurantes",
-    icon: "utensils",
+    icon: "🍽️",
     color: "#B9862E",
   },
-  { id: "category-home", name: "Vivienda", icon: "home", color: "#6B7280" },
+  { id: "category-home", name: "Vivienda", icon: "🏠", color: "#6B7280" },
   {
     id: "category-health",
     name: "Salud",
-    icon: "heart-pulse",
+    icon: "❤️",
     color: "#D64550",
   },
-  { id: "category-other", name: "Otros", icon: "tag", color: "#5B6B79" },
+  { id: "category-other", name: "Otros", icon: "🏷️", color: "#5B6B79" },
 ];
 const demoInitial: FinanceState = {
   schemaVersion: 3,
@@ -66,6 +66,12 @@ const demoInitial: FinanceState = {
       currency: "COP",
       currentBalance: 50_000_000,
       scope: "household",
+      ownerMemberId: "demo-me",
+      ownerName: "Tú",
+      icon: "🏦",
+      color: "#059669",
+      reservedAmount: 0,
+      availableBalance: 50_000_000,
     },
     {
       id: "local-private",
@@ -74,6 +80,12 @@ const demoInitial: FinanceState = {
       currency: "COP",
       currentBalance: 2_000_000,
       scope: "private",
+      ownerMemberId: "demo-me",
+      ownerName: "Tú",
+      icon: "💳",
+      color: "#059669",
+      reservedAmount: 0,
+      availableBalance: 2_000_000,
     },
   ],
   accountConnections: [
@@ -298,7 +310,8 @@ function serverPocketToView(item: Record<string, unknown>): PocketView {
     currency: String(item.currency),
     currentAmount,
     targetAmount,
-    color: item.visibility === "private" ? "rose" : "mint",
+    color: String(item.color ?? "#123C69"),
+    icon: String(item.icon ?? "💰"),
     note:
       targetAmount > 0
         ? `${Math.round((currentAmount / targetAmount) * 100)} % completado`
@@ -308,6 +321,27 @@ function serverPocketToView(item: Record<string, unknown>): PocketView {
     monthlyContribution: Number(policy.contributionAmount ?? 0) || undefined,
     version: Number(item.version ?? 1),
     status: (item.status as PocketView["status"]) ?? "active",
+    fundingLots: ((item.fundingLots ?? []) as Record<string, unknown>[]).map(
+      (lot) => ({
+        id: String(lot.id),
+        ...(lot.sourceAccountId
+          ? { sourceAccountId: String(lot.sourceAccountId) }
+          : { sourceAccountId: null }),
+        ...(lot.sourceLedgerScope
+          ? {
+              sourceLedgerScope:
+                lot.sourceLedgerScope === "private"
+                  ? ("private" as const)
+                  : ("household" as const),
+            }
+          : { sourceLedgerScope: null }),
+        contributorMemberId: String(lot.contributorMemberId),
+        remainingAmount: Number(lot.remainingAmount),
+        origin: String(lot.origin),
+        ...(lot.reason ? { reason: String(lot.reason) } : {}),
+      }),
+    ),
+    unreconciledAmount: Number(item.unreconciledAmount ?? 0),
   };
 }
 
@@ -443,6 +477,14 @@ export async function hydrateFinanceData(): Promise<void> {
       currency: String(item.currency),
       currentBalance: Number(item.currentBalance),
       scope: item.scope === "private" ? "private" : "household",
+      ownerMemberId: item.ownerMemberId ? String(item.ownerMemberId) : null,
+      ownerName: String(item.ownerName ?? "Hogar"),
+      icon: String(item.icon ?? "🏦"),
+      color: String(item.color ?? "#123C69"),
+      reservedAmount: Number(item.reservedAmount ?? 0),
+      availableBalance: Number(
+        item.availableBalance ?? item.currentBalance ?? 0,
+      ),
     })),
     accountConnections: accountResult.connections,
     members: ((household.members ?? []) as Record<string, unknown>[]).map(
@@ -505,10 +547,25 @@ export async function hydrateFinanceData(): Promise<void> {
         item.transactionType === "deposit"
           ? "income"
           : item.transactionType === "transfer"
-            ? "allocation"
+            ? "transfer"
             : "expense",
       date: new Date(String(item.occurredAt)).toLocaleDateString("es-CO"),
       occurredAt: String(item.occurredAt),
+      ...(item.sourceAccountId
+        ? { sourceAccountId: String(item.sourceAccountId) }
+        : {}),
+      ...(item.destinationAccountId
+        ? { destinationAccountId: String(item.destinationAccountId) }
+        : {}),
+      spendingNature:
+        item.spendingNature === "personal" ? "personal" : "household",
+      canCorrect: Boolean(item.canCorrect),
+      canReverse: Boolean(item.canReverse),
+      reversed: Boolean(item.reversed),
+      isReversal: Boolean(item.isReversal),
+      ...(item.correctionAllowedUntil
+        ? { correctionAllowedUntil: String(item.correctionAllowedUntil) }
+        : {}),
       ...(item.syncStatus === "synchronized"
         ? { syncStatus: "synchronized" as const }
         : item.syncStatus === "failed"
@@ -538,6 +595,8 @@ export async function createPocket(input: {
   policyKind: NonNullable<PocketView["policyKind"]>;
   targetDate?: string;
   monthlyContribution?: number;
+  icon?: string;
+  color?: string;
 }): Promise<string> {
   if (isServerMode()) {
     const policy =
@@ -566,6 +625,8 @@ export async function createPocket(input: {
         ...input,
         purpose: "custom",
         notes: input.observations?.trim() || undefined,
+        icon: input.icon ?? "💰",
+        color: input.color ?? "#123C69",
         policy,
       }),
     });
@@ -586,7 +647,8 @@ export async function createPocket(input: {
     currency: input.currency,
     currentAmount: 0,
     targetAmount: input.targetAmount,
-    color: input.visibility === "private" ? "rose" : "mint",
+    color: input.color ?? "#123C69",
+    icon: input.icon ?? "💰",
     note: "Nuevo · 0 % completado",
     policyKind: input.policyKind,
     targetDate: input.targetDate,
@@ -609,6 +671,8 @@ export async function updatePocket(
     policyKind: NonNullable<PocketView["policyKind"]>;
     targetDate?: string;
     monthlyContribution?: number;
+    icon?: string;
+    color?: string;
   },
 ): Promise<void> {
   if (!isServerMode()) {
@@ -648,6 +712,8 @@ export async function updatePocket(
       name: input.name,
       purpose: "custom",
       notes: input.observations?.trim() ?? "",
+      ...(input.icon !== undefined ? { icon: input.icon } : {}),
+      ...(input.color !== undefined ? { color: input.color } : {}),
       visibility: input.visibility,
       policy,
       version: pocket.version ?? 1,
@@ -692,41 +758,61 @@ export async function archivePocket(
 
 export async function createTransaction(input: {
   amount: number;
-  pocketId: string;
   merchant: string;
   category: string;
   payerMemberId: string;
-  accountId?: string;
+  accountId: string;
+  destinationAccountId?: string;
   kind?: TransactionView["kind"];
+  spendingNature?: "household" | "personal";
 }): Promise<void> {
   const state = get(financeData);
-  const pocket = state.pockets.find((item) => item.id === input.pocketId);
-  if (!pocket) throw new Error("Selecciona un bolsillo válido");
   const kind = input.kind ?? "expense";
-  if (isServerMode()) {
-    const accountScope = pocket.visibility;
-    const account = state.accounts.find(
-      (item) =>
-        item.id === input.accountId &&
-        (item.scope === accountScope ||
-          (pocket.visibility === "private" && item.scope === "household")),
-    );
-    if (!account) {
-      throw new Error("Selecciona una cuenta compatible con el bolsillo");
+  const account = state.accounts.find((item) => item.id === input.accountId);
+  if (!account) throw new Error("Selecciona una cuenta válida");
+  const destinationAccount =
+    kind === "transfer"
+      ? state.accounts.find((item) => item.id === input.destinationAccountId)
+      : undefined;
+  if (kind === "transfer") {
+    if (!destinationAccount)
+      throw new Error("Selecciona la cuenta que recibirá el dinero");
+    if (destinationAccount.id === account.id)
+      throw new Error("Elige dos cuentas diferentes");
+    if (
+      destinationAccount.scope !== account.scope ||
+      destinationAccount.currency !== account.currency
+    ) {
+      throw new Error(
+        "La transferencia requiere cuentas del mismo libro y moneda",
+      );
     }
+  }
+  if (isServerMode()) {
     const idempotencyKey = crypto.randomUUID();
     const body = {
-      type: kind === "income" ? "deposit" : "withdrawal",
+      type:
+        kind === "income"
+          ? "deposit"
+          : kind === "transfer"
+            ? "transfer"
+            : "withdrawal",
       amount: String(input.amount),
-      currency: pocket.currency,
+      currency: account.currency,
       description: input.merchant,
       category: input.category,
-      pocketId: pocket.id,
       occurredAt: new Date().toISOString(),
       fundingSourceScope: account.scope,
       payerMemberId: input.payerMemberId,
-      sourceId: kind === "expense" ? account.id : undefined,
-      destinationId: kind === "income" ? account.id : undefined,
+      spendingNature: input.spendingNature ?? "household",
+      sourceId:
+        kind === "expense" || kind === "transfer" ? account.id : undefined,
+      destinationId:
+        kind === "income"
+          ? account.id
+          : kind === "transfer"
+            ? destinationAccount?.id
+            : undefined,
     };
     try {
       await apiRequest("/v1/transactions", {
@@ -741,13 +827,13 @@ export async function createTransaction(input: {
         id: `offline:${idempotencyKey}`,
         merchant: input.merchant,
         category: input.category,
-        pocket: pocket.name,
-        pocketId: pocket.id,
+        pocket: "Sin bolsillo",
+        pocketId: "",
         payer:
           state.members.find((member) => member.id === input.payerMemberId)
             ?.displayName ?? state.settings.memberName,
         amount: input.amount,
-        currency: pocket.currency,
+        currency: account.currency,
         scope: account.scope,
         kind,
         date: "Pendiente",
@@ -755,6 +841,15 @@ export async function createTransaction(input: {
         syncStatus: "queued",
         reviewStatus: "REVIEWED",
         origin: "OFFLINE_SYNC",
+        sourceAccountId:
+          kind === "expense" || kind === "transfer" ? account.id : undefined,
+        destinationAccountId:
+          kind === "income"
+            ? account.id
+            : kind === "transfer"
+              ? destinationAccount?.id
+              : undefined,
+        spendingNature: input.spendingNature ?? "household",
       };
       financeData.update((current) => ({
         ...current,
@@ -769,39 +864,67 @@ export async function createTransaction(input: {
     id: crypto.randomUUID(),
     merchant: input.merchant,
     category: input.category,
-    pocket: pocket.name,
-    pocketId: pocket.id,
+    pocket: "Sin bolsillo",
+    pocketId: "",
     payer:
       state.members.find((member) => member.id === input.payerMemberId)
         ?.displayName ?? state.settings.memberName,
     amount: input.amount,
-    currency: pocket.currency,
-    scope: pocket.visibility,
+    currency: account.currency,
+    scope: account.scope,
     kind,
     date: "Ahora",
     occurredAt: new Date().toISOString(),
+    sourceAccountId:
+      kind === "expense" || kind === "transfer" ? account.id : undefined,
+    destinationAccountId:
+      kind === "income"
+        ? account.id
+        : kind === "transfer"
+          ? destinationAccount?.id
+          : undefined,
+    spendingNature: input.spendingNature ?? "household",
+    canCorrect: true,
+    correctionAllowedUntil: new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
+    ).toISOString(),
   };
   financeData.update((current) => ({
     ...current,
     transactions: [transaction, ...current.transactions],
-    pockets: current.pockets.map((item) =>
-      item.id === pocket.id
+    accounts: current.accounts.map((item) =>
+      item.id === account.id
         ? {
             ...item,
-            currentAmount: Math.max(
-              0,
-              item.currentAmount +
-                (kind === "expense" ? -input.amount : input.amount),
-            ),
+            currentBalance:
+              item.currentBalance +
+              (kind === "expense" || kind === "transfer"
+                ? -input.amount
+                : input.amount),
+            availableBalance:
+              item.availableBalance +
+              (kind === "expense" || kind === "transfer"
+                ? -input.amount
+                : input.amount),
           }
-        : item,
+        : kind === "transfer" && item.id === destinationAccount?.id
+          ? {
+              ...item,
+              currentBalance: item.currentBalance + input.amount,
+              availableBalance: item.availableBalance + input.amount,
+            }
+          : item,
     ),
   }));
 }
 
 export async function updateTransaction(
   transactionId: string,
-  input: { merchant: string; category: string },
+  input: {
+    merchant: string;
+    category: string;
+    spendingNature?: "household" | "personal";
+  },
 ): Promise<void> {
   if (!isServerMode()) {
     financeData.update((state) => ({
@@ -821,25 +944,173 @@ export async function updateTransaction(
   await hydrateFinanceData();
 }
 
+export async function reverseTransaction(transactionId: string): Promise<void> {
+  if (!isServerMode()) {
+    const state = get(financeData);
+    const original = state.transactions.find(
+      (transaction) => transaction.id === transactionId,
+    );
+    if (!original) throw new Error("No encontramos el movimiento");
+    if (original.canReverse === false || original.canCorrect === false) {
+      throw new Error("El plazo de siete días terminó");
+    }
+    const reversal: TransactionView = {
+      ...original,
+      id: crypto.randomUUID(),
+      merchant: `Reversión: ${original.merchant}`,
+      kind:
+        original.kind === "expense"
+          ? "income"
+          : original.kind === "income"
+            ? "expense"
+            : "transfer",
+      occurredAt: new Date().toISOString(),
+      date: "Ahora",
+      sourceAccountId: original.destinationAccountId,
+      destinationAccountId: original.sourceAccountId,
+      isReversal: true,
+      canCorrect: false,
+      canReverse: false,
+    };
+    financeData.update((current) => ({
+      ...current,
+      transactions: [
+        reversal,
+        ...current.transactions.map((transaction) =>
+          transaction.id === transactionId
+            ? { ...transaction, reversed: true, canReverse: false }
+            : transaction,
+        ),
+      ],
+      accounts: current.accounts.map((account) => {
+        const delta =
+          original.kind === "expense" && account.id === original.sourceAccountId
+            ? original.amount
+            : original.kind === "income" &&
+                account.id === original.destinationAccountId
+              ? -original.amount
+              : original.kind === "transfer" &&
+                  account.id === original.destinationAccountId
+                ? -original.amount
+                : original.kind === "transfer" &&
+                    account.id === original.sourceAccountId
+                  ? original.amount
+                  : 0;
+        return delta === 0
+          ? account
+          : {
+              ...account,
+              currentBalance: account.currentBalance + delta,
+              availableBalance: account.availableBalance + delta,
+            };
+      }),
+    }));
+    return;
+  }
+  await apiRequest(`/v1/transactions/${transactionId}/reverse`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+  });
+  await hydrateFinanceData();
+}
+
 export async function allocateToPocket(
   pocketId: string,
   amount: number,
+  sourceAccountId: string,
+  mode: "account" | "initial_adjustment" | "correction" = "account",
+  reason?: string,
 ): Promise<void> {
+  const state = get(financeData);
+  const account = state.accounts.find((item) => item.id === sourceAccountId);
+  if (mode === "account" && !account) {
+    throw new Error("Selecciona la cuenta de origen");
+  }
   if (isServerMode()) {
     await apiRequest(`/v1/pockets/${pocketId}/allocate`, {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({ amount: String(amount) }),
+      body: JSON.stringify({
+        amount: String(amount),
+        ...(account ? { sourceAccountId: account.id } : {}),
+        ...(account ? { sourceLedgerScope: account.scope } : {}),
+        mode,
+        ...(reason?.trim() ? { reason: reason.trim() } : {}),
+      }),
     });
     await hydrateFinanceData();
     return;
   }
-  financeData.update((state) => ({
-    ...state,
-    pockets: state.pockets.map((pocket) =>
+  financeData.update((current) => ({
+    ...current,
+    pockets: current.pockets.map((pocket) =>
       pocket.id === pocketId
-        ? { ...pocket, currentAmount: pocket.currentAmount + amount }
+        ? {
+            ...pocket,
+            currentAmount: pocket.currentAmount + amount,
+            fundingLots: [
+              ...(pocket.fundingLots ?? []),
+              {
+                id: crypto.randomUUID(),
+                sourceAccountId: account?.id ?? null,
+                sourceLedgerScope: account?.scope ?? null,
+                contributorMemberId: current.settings.memberId,
+                remainingAmount: amount,
+                origin: mode,
+                ...(reason ? { reason } : {}),
+              },
+            ],
+          }
         : pocket,
+    ),
+    accounts: current.accounts.map((item) =>
+      item.id === account?.id
+        ? {
+            ...item,
+            reservedAmount: item.reservedAmount + amount,
+            availableBalance: item.availableBalance - amount,
+          }
+        : item,
+    ),
+  }));
+}
+
+export async function releaseFromPocket(
+  pocketId: string,
+  amount: number,
+  targetAccountId: string,
+): Promise<void> {
+  const state = get(financeData);
+  const account = state.accounts.find((item) => item.id === targetAccountId);
+  if (!account) throw new Error("Selecciona la cuenta de destino");
+  if (isServerMode()) {
+    await apiRequest(`/v1/pockets/${pocketId}/release`, {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({
+        amount: String(amount),
+        targetAccountId: account.id,
+        targetLedgerScope: account.scope,
+      }),
+    });
+    await hydrateFinanceData();
+    return;
+  }
+  financeData.update((current) => ({
+    ...current,
+    pockets: current.pockets.map((pocket) =>
+      pocket.id === pocketId
+        ? { ...pocket, currentAmount: pocket.currentAmount - amount }
+        : pocket,
+    ),
+    accounts: current.accounts.map((item) =>
+      item.id === account.id
+        ? {
+            ...item,
+            reservedAmount: item.reservedAmount - amount,
+            availableBalance: item.availableBalance + amount,
+          }
+        : item,
     ),
   }));
 }
@@ -907,6 +1178,9 @@ export async function createAccount(input: {
   scope: "household" | "private";
   openingBalance?: number;
   openingBalanceDate?: string;
+  ownerMemberId?: string | null;
+  icon?: string;
+  color?: string;
 }): Promise<void> {
   if (!isServerMode()) {
     financeData.update((state) => ({
@@ -919,6 +1193,14 @@ export async function createAccount(input: {
           currency: input.currency,
           currentBalance: input.openingBalance ?? 0,
           scope: input.scope,
+          ownerMemberId: input.ownerMemberId ?? null,
+          ownerName:
+            state.members.find((member) => member.id === input.ownerMemberId)
+              ?.displayName ?? (input.scope === "private" ? "Tú" : "Hogar"),
+          icon: input.icon ?? "🏦",
+          color: input.color ?? "#123C69",
+          reservedAmount: 0,
+          availableBalance: input.openingBalance ?? 0,
         },
         ...state.accounts,
       ],
@@ -940,7 +1222,13 @@ export async function createAccount(input: {
 
 export async function updateAccount(
   account: AccountView,
-  input: { name?: string; currency?: string },
+  input: {
+    name?: string;
+    currency?: string;
+    ownerMemberId?: string | null;
+    icon?: string;
+    color?: string;
+  },
 ): Promise<void> {
   if (!isServerMode()) {
     financeData.update((state) => ({
@@ -1484,6 +1772,7 @@ export async function reconcileExpectedIncome(
   incomeId: string,
   attributionId: string,
   actualAmount: number,
+  notes?: string,
 ): Promise<void> {
   if (!isServerMode()) {
     await updateExpectedIncome(incomeId, {
@@ -1497,6 +1786,7 @@ export async function reconcileExpectedIncome(
     body: JSON.stringify({
       attributionId,
       actualAmount: String(actualAmount),
+      ...(notes?.trim() ? { notes: notes.trim() } : {}),
     }),
   });
   await hydrateFinanceData();
@@ -1921,10 +2211,18 @@ export async function importFinanceData(raw: string): Promise<void> {
         targetDate: pocket.targetDate,
         monthlyContribution:
           pocket.monthlyContribution ?? Math.max(1, pocket.targetAmount / 12),
+        icon: pocket.icon ?? "💰",
+        color: pocket.color ?? "#123C69",
       });
       pocketIds.set(pocket.id, createdId);
       if (pocket.currentAmount > 0) {
-        await allocateToPocket(createdId, pocket.currentAmount);
+        await allocateToPocket(
+          createdId,
+          pocket.currentAmount,
+          "",
+          "initial_adjustment",
+          "Saldo importado desde una copia de seguridad de OKLE",
+        );
       }
     }
     const sourceIds = new Map<string, string>();

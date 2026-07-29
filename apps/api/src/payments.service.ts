@@ -48,6 +48,7 @@ const paymentInput = z.object({
   paymentUrl: safeUrl.optional(),
   reference: z.string().trim().max(160).optional(),
   notes: z.string().trim().max(1000).optional(),
+  responsibleMemberId: z.string().min(1).optional(),
 });
 const paymentPatch = paymentInput.partial().extend({
   totalAmount: money.nullable().optional(),
@@ -63,7 +64,6 @@ const occurrenceInput = z.object({
 });
 const paidInput = z.object({
   actualAmount: money,
-  sourcePocketId: z.string().uuid().optional(),
   sourceAccountId: z.string().min(1),
   fundingSourceScope: z.enum(["household", "private"]),
   payerMemberId: z.string().min(1).optional(),
@@ -116,7 +116,12 @@ export class PaymentsService {
   list(actor: Actor) {
     return this.prisma.paymentPlan.findMany({
       where: { ...this.visible(actor), status: { not: "archived" } },
-      include: { occurrences: { orderBy: { dueDate: "asc" } } },
+      include: {
+        responsible: {
+          select: { id: true, displayName: true, color: true },
+        },
+        occurrences: { orderBy: { dueDate: "asc" } },
+      },
       orderBy: [{ nextDueDate: "asc" }, { updatedAt: "desc" }],
     });
   }
@@ -142,10 +147,15 @@ export class PaymentsService {
     const parsed = paymentInput.safeParse(raw);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     const input = parsed.data;
+    const responsibleMemberId = await this.validateResponsible(
+      input.responsibleMemberId ?? actor.memberId,
+      actor,
+    );
     return this.prisma.paymentPlan.create({
       data: {
         householdId: actor.householdId,
         ownerMemberId: actor.memberId,
+        responsibleMemberId,
         name: input.name,
         type: input.type,
         visibility: input.visibility,
@@ -189,6 +199,10 @@ export class PaymentsService {
     const parsed = paymentPatch.safeParse(raw);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     const input = parsed.data;
+    const responsibleMemberId =
+      input.responsibleMemberId !== undefined
+        ? await this.validateResponsible(input.responsibleMemberId, actor)
+        : undefined;
     await this.prisma.paymentPlan.update({
       where: { id },
       data: {
@@ -210,6 +224,7 @@ export class PaymentsService {
           : {}),
         ...(input.notes !== undefined ? { notes: input.notes ?? null } : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(responsibleMemberId !== undefined ? { responsibleMemberId } : {}),
         ...(input.totalAmount !== undefined
           ? {
               totalAmount: input.totalAmount
@@ -335,20 +350,6 @@ export class PaymentsService {
     }
     if (occurrence.status === "paid")
       throw new ConflictException("El pago ya fue marcado como realizado");
-    if (parsed.data.sourcePocketId) {
-      const pocket = await this.prisma.pocket.findUnique({
-        where: { id: parsed.data.sourcePocketId },
-      });
-      if (
-        !pocket ||
-        pocket.householdId !== actor.householdId ||
-        pocket.currency !== occurrence.paymentPlan.currency ||
-        pocket.visibility !== occurrence.paymentPlan.visibility ||
-        (pocket.visibility === "private" &&
-          pocket.ownerMemberId !== actor.memberId)
-      )
-        throw new NotFoundException();
-    }
     const attribution = await this.transactions.create(
       {
         type: "withdrawal",
@@ -359,9 +360,6 @@ export class PaymentsService {
         fundingSourceScope: parsed.data.fundingSourceScope,
         occurredAt: new Date().toISOString(),
         payerMemberId: parsed.data.payerMemberId ?? actor.memberId,
-        ...(parsed.data.sourcePocketId
-          ? { pocketId: parsed.data.sourcePocketId }
-          : {}),
         category:
           occurrence.paymentPlan.type === "debt"
             ? "Deudas"
@@ -382,7 +380,7 @@ export class PaymentsService {
           status: "paid",
           paidAt: new Date(),
           actualAmount: new Prisma.Decimal(parsed.data.actualAmount),
-          sourcePocketId: parsed.data.sourcePocketId ?? null,
+          sourcePocketId: null,
           transactionAttributionId: attribution.id,
           note: parsed.data.note ?? null,
         },
@@ -478,6 +476,19 @@ export class PaymentsService {
       }
       return updated;
     });
+  }
+
+  private async validateResponsible(memberId: string, actor: Actor) {
+    const member = await this.prisma.member.findFirst({
+      where: { id: memberId, householdId: actor.householdId },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new BadRequestException(
+        "La persona responsable no pertenece al hogar",
+      );
+    }
+    return member.id;
   }
 
   private async find(id: string, actor: Actor) {

@@ -6,9 +6,9 @@
   const progress = $derived(Math.min(100, Math.round((pocket.currentAmount / pocket.targetAmount) * 100)));
 </script>
 
-<article class="pocket-card tone-{pocket.color}" class:private-pocket={pocket.visibility === "private"} class:partner-pocket={pocket.visibility === "household" && Boolean(pocket.ownerMemberId) && pocket.ownerMemberId !== $financeData.settings.memberId}>
+<article class="pocket-card" style={`--pocket-color:${pocket.color}`} class:private-pocket={pocket.visibility === "private"} class:partner-pocket={pocket.visibility === "household" && Boolean(pocket.ownerMemberId) && pocket.ownerMemberId !== $financeData.settings.memberId}>
   <header>
-    <span class="pocket-symbol" aria-hidden="true">{pocket.visibility === "private" ? "✦" : "↗"}</span>
+    <span class="pocket-symbol" aria-hidden="true">{pocket.icon}</span>
     <span class="privacy">{pocket.visibility === "private" ? "Solo yo" : "Compartido"}</span>
   </header>
   <div>

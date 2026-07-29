@@ -5,6 +5,7 @@
   import { authMode, isAuthenticated, isServerMode, login } from "$lib/auth";
   import LocalLogin from "$lib/LocalLogin.svelte";
   import ThemeToggle from "$lib/ThemeToggle.svelte";
+  import NotificationBell from "$lib/NotificationBell.svelte";
   import { page } from "$app/state";
   import { onMount } from "svelte";
   import "$lib/theme";
@@ -55,6 +56,7 @@
 {:else}
   <div class="app-shell">
     <Nav />
+    <NotificationBell />
     <ThemeToggle />
     <main>{@render children()}</main>
   </div>

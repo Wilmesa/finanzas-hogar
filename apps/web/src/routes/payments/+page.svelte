@@ -13,6 +13,7 @@
     id: string; name: string; type: string; visibility: "household" | "private";
     currency: string; totalAmount?: number; estimatedAmount?: number; recurrence: string;
     nextDueDate?: string; paymentUrl?: string; reference?: string; notes?: string;
+    responsibleMemberId?: string; responsible?: { id: string; displayName: string; color: string };
     status: string; occurrences: Occurrence[];
   };
 
@@ -33,10 +34,10 @@
   let reference = $state("");
   let notes = $state("");
   let privatePayment = $state(false);
+  let responsibleMemberId = $state("");
   let payingOccurrence = $state<Occurrence | null>(null);
   let payingPayment = $state<Payment | null>(null);
   let actualAmount = $state<number | undefined>();
-  let sourcePocketId = $state("");
   let sourceAccountId = $state("");
   const typeLabels: Record<string, string> = {
     service: "Servicio", debt: "Deuda o crédito", rent: "Arriendo",
@@ -77,6 +78,7 @@
     nextDueDate = payment?.nextDueDate ?? new Date().toISOString().slice(0, 10);
     paymentUrl = payment?.paymentUrl ?? ""; reference = payment?.reference ?? "";
     notes = payment?.notes ?? ""; privatePayment = payment?.visibility === "private";
+    responsibleMemberId = payment?.responsibleMemberId ?? $financeData.settings.memberId;
     showForm = true; error = ""; success = "";
   }
 
@@ -90,6 +92,7 @@
       ...(paymentUrl.trim() ? { paymentUrl: paymentUrl.trim() } : {}),
       ...(reference.trim() ? { reference: reference.trim() } : {}),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
+      responsibleMemberId: responsibleMemberId || $financeData.settings.memberId,
     };
     try {
       if (isServerMode()) {
@@ -155,7 +158,6 @@
     payingPayment = payment;
     payingOccurrence = occurrence;
     actualAmount = occurrence.plannedAmount;
-    sourcePocketId = "";
     sourceAccountId =
       $financeData.accounts.find(
         (account) => account.scope === payment.visibility,
@@ -180,14 +182,13 @@
             $financeData.accounts.find((account) => account.id === sourceAccountId)?.scope ??
             payingPayment.visibility,
           ...($financeData.settings.memberId ? { payerMemberId: $financeData.settings.memberId } : {}),
-          ...(sourcePocketId ? { sourcePocketId } : {}),
         }),
       });
       await load();
     } else {
       payments = payments.map((payment) => {
         if (!payment.occurrences.some((item) => item.id === paidOccurrence.id)) return payment;
-        const paidOccurrences = payment.occurrences.map((item) => item.id === paidOccurrence.id ? { ...item, status: "paid", actualAmount, sourcePocketId, paidAt: new Date().toISOString() } : item);
+        const paidOccurrences = payment.occurrences.map((item) => item.id === paidOccurrence.id ? { ...item, status: "paid", actualAmount, paidAt: new Date().toISOString() } : item);
         const next = paidOccurrences.find((item) => item.status === "planned") ?? createNextLocalOccurrence(payment, paidOccurrence);
         return {
           ...payment,
@@ -226,13 +227,13 @@
 </script>
 
 <div class="page payments-page">
-  <header class="page-header"><div><span class="eyebrow">Compromisos y vencimientos</span><h1>Pagos</h1><p>Programa servicios, cuotas y obligaciones; guarda el enlace, la referencia y el bolsillo que los cubre.</p></div><button class="primary-button" onclick={() => openForm()}>＋ Nuevo pago</button></header>
+  <header class="page-header"><div><span class="eyebrow">Compromisos y vencimientos</span><h1>Pagos</h1><p>Programa servicios, cuotas y obligaciones; asigna responsable, fecha, enlace y referencia.</p></div><button class="primary-button" onclick={() => openForm()}>＋ Nuevo pago</button></header>
   {#if error}<p class="form-error" role="alert">{error}</p>{/if}
   {#if success}<p class="success-message" role="status">{success}</p>{/if}
   <section class="payment-grid">
     {#each payments as payment}
       <article class="panel payment-card" class:private={payment.visibility === "private"}>
-        <header><div><span class="privacy">{payment.visibility === "private" ? "Solo yo" : "Compartido"}</span><h2>{payment.name}</h2><small>{typeLabels[payment.type] ?? payment.type} · {payment.recurrence}</small></div><strong>{currency(payment.estimatedAmount ?? 0, payment.currency)}</strong></header>
+        <header><div><span class="privacy">{payment.visibility === "private" ? "Solo yo" : "Compartido"}</span><h2>{payment.name}</h2><small>{typeLabels[payment.type] ?? payment.type} · {payment.recurrence} · Responsable: {payment.responsible?.displayName ?? $financeData.members.find((member) => member.id === payment.responsibleMemberId)?.displayName ?? "Sin asignar"}</small></div><strong>{currency(payment.estimatedAmount ?? 0, payment.currency)}</strong></header>
         {#if payment.totalAmount}<div class="payment-total"><span>Compromiso total</span><b>{currency(payment.totalAmount, payment.currency)}</b></div>{/if}
         {#each payment.occurrences.filter((item) => item.status !== "paid").slice(0, 2) as occurrence}
           <div class={`payment-due ${urgency(occurrence.dueDate)}`}><span><small>Próximo vencimiento</small><b>{occurrence.dueDate}</b></span><button onclick={() => openPaid(payment, occurrence)}>Marcar pagado</button></div>
@@ -245,6 +246,6 @@
   </section>
 </div>
 
-{#if showForm}<div class="modal-backdrop" role="presentation"><div class="quick-entry payment-form" role="dialog" aria-modal="true"><header><div><span class="eyebrow">Calendario flexible</span><h2>{editing ? "Editar pago" : "Nuevo pago"}</h2></div><button class="icon-button" onclick={() => (showForm = false)}>×</button></header><div class="form-grid"><label>Nombre<input bind:value={name} placeholder="Ej. Energía" /></label><label>Tipo<select bind:value={type}><option value="service">Servicio</option><option value="debt">Deuda o crédito</option><option value="rent">Arriendo</option><option value="tax">Impuesto</option><option value="insurance">Seguro</option><option value="subscription">Suscripción</option><option value="other">Otro</option></select></label><label>Valor aproximado<input type="number" min="1" bind:value={amount} /></label><label>Total del compromiso (opcional)<input type="number" min="1" bind:value={totalAmount} /></label><label>Frecuencia<select bind:value={recurrence}><option value="once">Una vez</option><option value="weekly">Semanal</option><option value="biweekly">Quincenal</option><option value="monthly">Mensual</option><option value="quarterly">Trimestral</option><option value="annual">Anual</option><option value="custom">Personalizada</option></select></label><label>Próxima fecha<input type="date" bind:value={nextDueDate} /></label><label>Enlace de pago<input type="url" bind:value={paymentUrl} placeholder="https://…" /></label><label>Referencia<input bind:value={reference} /></label><label class="wide-field">Notas<input bind:value={notes} /></label><label class="switch-row wide-field"><input type="checkbox" bind:checked={privatePayment} /><span>Solo yo</span></label></div>{#if error}<p class="form-error">{error}</p>{/if}<button class="primary-button" disabled={saving} onclick={save}>{saving ? "Guardando…" : "Guardar pago"}</button></div></div>{/if}
+{#if showForm}<div class="modal-backdrop" role="presentation"><div class="quick-entry payment-form" role="dialog" aria-modal="true"><header><div><span class="eyebrow">Calendario flexible</span><h2>{editing ? "Editar pago" : "Nuevo pago"}</h2></div><button class="icon-button" onclick={() => (showForm = false)}>×</button></header><div class="form-grid"><label>Nombre<input bind:value={name} placeholder="Ej. Energía" /></label><label>Tipo<select bind:value={type}><option value="service">Servicio</option><option value="debt">Deuda o crédito</option><option value="rent">Arriendo</option><option value="tax">Impuesto</option><option value="insurance">Seguro</option><option value="subscription">Suscripción</option><option value="other">Otro</option></select></label><label>Responsable<select bind:value={responsibleMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label><label>Valor aproximado<input type="number" min="1" bind:value={amount} /></label><label>Total del compromiso (opcional)<input type="number" min="1" bind:value={totalAmount} /></label><label>Frecuencia<select bind:value={recurrence}><option value="once">Una vez</option><option value="weekly">Semanal</option><option value="biweekly">Quincenal</option><option value="monthly">Mensual</option><option value="quarterly">Trimestral</option><option value="annual">Anual</option><option value="custom">Personalizada</option></select></label><label>Próxima fecha<input type="date" bind:value={nextDueDate} /></label><label>Enlace de pago<input type="url" bind:value={paymentUrl} placeholder="https://…" /></label><label>Referencia<input bind:value={reference} /></label><label class="wide-field">Notas<input bind:value={notes} /></label><label class="switch-row wide-field"><input type="checkbox" bind:checked={privatePayment} /><span>Solo yo</span></label></div>{#if error}<p class="form-error">{error}</p>{/if}<button class="primary-button" disabled={saving} onclick={save}>{saving ? "Guardando…" : "Guardar pago"}</button></div></div>{/if}
 
-  {#if payingOccurrence && payingPayment}<div class="modal-backdrop" role="presentation"><div class="quick-entry" role="dialog" aria-modal="true"><header><h2>Confirmar pago</h2><button class="icon-button" onclick={() => { payingOccurrence = null; payingPayment = null; }}>×</button></header><label>Valor real<input type="number" min="1" bind:value={actualAmount} /></label><label>Cuenta real<select bind:value={sourceAccountId}><option value="">Selecciona una cuenta</option>{#each $financeData.accounts.filter((account) => account.scope === payingPayment?.visibility || (payingPayment?.visibility === "private" && account.scope === "household")) as account}<option value={account.id}>{account.name} · {account.currency} · {account.scope === "household" ? "Hogar" : "Personal"}</option>{/each}</select><small>OKLE creará un único retiro contable en Firefly. Si el pago es privado desde dinero común, el hogar solo verá “Asignación personal”.</small></label><label>Salió del bolsillo<select bind:value={sourcePocketId}><option value="">Sin bolsillo</option>{#each $financeData.pockets.filter((pocket) => pocket.visibility === payingPayment?.visibility && pocket.currency === payingPayment?.currency) as pocket}<option value={pocket.id}>{pocket.name}</option>{/each}</select><small>Si eliges un bolsillo también se registrará el evento spent, sin crear transferencias ficticias.</small></label><button class="primary-button" onclick={markPaid}>Registrar pago real</button></div></div>{/if}
+  {#if payingOccurrence && payingPayment}<div class="modal-backdrop" role="presentation"><div class="quick-entry" role="dialog" aria-modal="true"><header><h2>Confirmar pago</h2><button class="icon-button" onclick={() => { payingOccurrence = null; payingPayment = null; }}>×</button></header><label>Valor real<input type="number" min="1" bind:value={actualAmount} /></label><label>Cuenta real<select bind:value={sourceAccountId}><option value="">Selecciona una cuenta</option>{#each $financeData.accounts.filter((account) => account.scope === payingPayment?.visibility || (payingPayment?.visibility === "private" && account.scope === "household")) as account}<option value={account.id}>{account.icon} {account.name} · {currency(account.availableBalance, account.currency)} disponible</option>{/each}</select><small>OKLE creará un único retiro contable en Firefly. Si reservaste el dinero en un bolsillo, libéralo primero para que vuelva a estar disponible en esta cuenta.</small></label><button class="primary-button" onclick={markPaid}>Registrar pago real</button></div></div>{/if}

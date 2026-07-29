@@ -23,7 +23,7 @@
   let newsSources = $state<Array<{ source: string; ok: boolean; imported: number; error?: string }>>([]);
   let refreshingNews = $state(false);
   let categoryName = $state("");
-  let categoryIcon = $state("tag");
+  let categoryIcon = $state("🏷️");
   let categoryColor = $state("#123C69");
   let editingCategoryId = $state<string | null>(null);
   const newsPortals = [
@@ -116,7 +116,7 @@
       if (editingCategoryId) await updateCategory(editingCategoryId, input);
       else await createCategory(input);
       categoryName = "";
-      categoryIcon = "tag";
+      categoryIcon = "🏷️";
       categoryColor = "#123C69";
       editingCategoryId = null;
       message = "Categorías actualizadas.";
@@ -146,9 +146,11 @@
     <div class="shortcut-grid">
       <a href="/planning"><span>⌁</span><strong>Plan financiero</strong><small>Sueldos futuros, primas y destinos</small></a>
       <a href="/review"><span>⌕</span><strong>Bandeja de revisión</strong><small>Movimientos importados y reglas</small></a>
+      <a href="/transactions?mode=corrections"><span>✎</span><strong>Correcciones</strong><small>Movimientos editables de los últimos siete días</small></a>
       <a class="payments-shortcut" href="/payments"><span>✓</span><strong>Pagos</strong><small>Servicios, cuotas y vencimientos</small></a>
       <a href="/patrimony"><span>↗</span><strong>Patrimonio</strong><small>Inversiones, CDT e inmuebles</small></a>
       <a href="/future"><span>◫</span><strong>Simuladores</strong><small>Deudas y proyecciones futuras</small></a>
+      <a href="/calendar"><span>▦</span><strong>Calendario</strong><small>Gastos, ingresos y pagos por fecha</small></a>
     </div>
   </section>
   <PwaStatus />
@@ -156,8 +158,8 @@
   <IntegrationSettings />
   <section class="panel section-block">
     <span class="eyebrow">Clasificación del hogar</span><h2>Categorías</h2><p>Personaliza las etiquetas usadas al registrar y corregir movimientos.</p>
-    <div class="category-grid">{#each $financeData.categories as category}<div class="category-chip" style={`--category-color:${category.color}`}><span>{category.name}</span><button onclick={() => editCategory(category)}>Editar</button><button class="danger-text" onclick={() => removeCategory(category)}>Archivar</button></div>{/each}</div>
-    <div class="form-row category-form"><label>Nombre<input bind:value={categoryName} /></label><label>Icono<select bind:value={categoryIcon}><option value="tag">Etiqueta</option><option value="shopping-cart">Mercado</option><option value="bus">Transporte</option><option value="utensils">Restaurante</option><option value="home">Vivienda</option><option value="heart-pulse">Salud</option></select></label><label>Color<input type="color" bind:value={categoryColor} /></label><button class="secondary-button" onclick={saveCategory}>{editingCategoryId ? "Guardar" : "Agregar"}</button></div>
+    <div class="category-grid">{#each $financeData.categories as category}<div class="category-chip" style={`--category-color:${category.color}`}><b aria-hidden="true">{category.icon}</b><span>{category.name}</span><button onclick={() => editCategory(category)}>Editar</button><button class="danger-text" onclick={() => removeCategory(category)}>Archivar</button></div>{/each}</div>
+    <div class="form-row category-form"><label>Nombre<input bind:value={categoryName} /></label><label>Emoji<input maxlength="16" bind:value={categoryIcon} placeholder="🏷️" /></label><label>Color<input type="color" bind:value={categoryColor} /></label><button class="secondary-button" onclick={saveCategory}>{editingCategoryId ? "Guardar" : "Agregar"}</button></div>
   </section>
   {#if isServerMode() && authMode() === "local"}
     <details class="panel-card">
@@ -179,6 +181,7 @@
       <a href="/accounts"><span class="settings-icon">◇</span><span><strong>Cuentas y tarjetas</strong><small>Libros compartido y privado en Firefly</small></span><b>›</b></a>
       <a href="/pockets"><span class="settings-icon">◎</span><span><strong>Bolsillos</strong><small>Propósitos, metas y privacidad</small></span><b>›</b></a>
       <a href="/review"><span class="settings-icon">⌕</span><span><strong>Revisión y reglas</strong><small>Validar movimientos importados</small></span><b>›</b></a>
+      <a href="/transactions?mode=corrections"><span class="settings-icon">✎</span><span><strong>Correcciones recientes</strong><small>Clasificar de nuevo durante siete días</small></span><b>›</b></a>
       <a href="/onboarding"><span class="settings-icon">✓</span><span><strong>Revisar configuración</strong><small>Diagnóstico guiado de OKLE</small></span><b>›</b></a>
       <button onclick={downloadExport}><span class="settings-icon">⇩</span><span><strong>Exportar y respaldar</strong><small>Descargar un JSON portable</small></span><b>›</b></button>
       <label class="import-action"><span class="settings-icon">⇧</span><span><strong>Importar datos</strong><small>Restaurar una exportación JSON</small></span><b>›</b><input class="sr-only" type="file" accept="application/json" onchange={importFile} /></label>

@@ -439,11 +439,17 @@
     );
     const transaction = candidates[selected - 1];
     if (!transaction) return;
+    const arrivalNotes =
+      prompt(
+        "Observaciones sobre el valor recibido (opcional)",
+        income.notes ?? "",
+      ) ?? "";
     try {
       await reconcileExpectedIncome(
         income.id,
         transaction.id,
         transaction.amount,
+        arrivalNotes,
       );
       success = "Ingreso real conciliado. Ya puedes ejecutar el acuerdo guardado.";
     } catch (cause) {

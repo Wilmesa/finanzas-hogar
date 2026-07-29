@@ -50,6 +50,7 @@
     <a class:active={page.url.pathname === "/copilot"} href="/copilot">Asesor IA</a>
     <a class:active={page.url.pathname === "/accounts"} href="/accounts">Cuentas y tarjetas</a>
     <a class:active={page.url.pathname === "/household"} href="/household">Hogar y perfiles</a>
+    <a class:active={page.url.pathname === "/calendar"} href="/calendar">Calendario</a>
   </div>
   <div class="member">
     <span class="avatar" style={`background:${$financeData.settings.memberColor}`}>

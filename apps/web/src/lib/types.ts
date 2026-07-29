@@ -9,7 +9,18 @@ export interface PocketView {
   currentAmount: number;
   targetAmount: number;
   color: string;
+  icon: string;
   note: string;
+  fundingLots?: Array<{
+    id: string;
+    sourceAccountId?: string | null;
+    sourceLedgerScope?: "household" | "private" | null;
+    contributorMemberId: string;
+    remainingAmount: number;
+    origin: string;
+    reason?: string | null;
+  }>;
+  unreconciledAmount?: number;
   policyKind?: "target_by_date" | "target_by_contribution" | "periodic_spend";
   targetDate?: string;
   monthlyContribution?: number;
@@ -29,10 +40,18 @@ export interface TransactionView {
   pocketId: string;
   currency: string;
   scope: "household" | "private";
-  kind: "expense" | "income" | "allocation";
+  kind: "expense" | "income" | "transfer" | "allocation";
   syncStatus?: "queued" | "synchronized" | "failed";
   reviewStatus?: "PENDING" | "REVIEWED" | "FLAGGED_FOR_PARTNER";
   origin?: "MANUAL" | "FIREFLY_WEBHOOK" | "OPEN_FINANCE" | "OFFLINE_SYNC";
+  sourceAccountId?: string;
+  destinationAccountId?: string;
+  spendingNature?: "household" | "personal";
+  canCorrect?: boolean;
+  canReverse?: boolean;
+  reversed?: boolean;
+  isReversal?: boolean;
+  correctionAllowedUntil?: string;
 }
 
 export interface AccountView {
@@ -42,6 +61,12 @@ export interface AccountView {
   currency: string;
   currentBalance: number;
   scope: "household" | "private";
+  ownerMemberId?: string | null;
+  ownerName: string;
+  icon: string;
+  color: string;
+  reservedAmount: number;
+  availableBalance: number;
 }
 
 export interface AccountConnectionView {

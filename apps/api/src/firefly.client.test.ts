@@ -2,6 +2,7 @@ import { ServiceUnavailableException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "./auth.js";
 import { AccountsController } from "./controllers.js";
+import { AccountsService } from "./accounts.service.js";
 import { FireflyClient } from "./firefly.client.js";
 
 const actor: Actor = {
@@ -86,7 +87,21 @@ describe("Firefly accounts", () => {
         .mockRejectedValueOnce(new Error("private unavailable")),
       hasToken: vi.fn(() => true),
     };
-    const result = await new AccountsController(firefly as never).list(actor);
+    const prisma = {
+      accountProfile: { findMany: vi.fn(async () => []) },
+      pocketFundingLot: { groupBy: vi.fn(async () => []) },
+      member: {
+        findMany: vi.fn(async () => [
+          {
+            id: actor.memberId,
+            displayName: actor.displayName,
+            color: "#123C69",
+          },
+        ]),
+      },
+    };
+    const accounts = new AccountsService(prisma as never, firefly as never);
+    const result = await new AccountsController(accounts).list(actor);
     expect(result.accounts).toHaveLength(1);
     expect(result.connections).toEqual([
       expect.objectContaining({ scope: "household", status: "available" }),

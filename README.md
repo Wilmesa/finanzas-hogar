@@ -6,10 +6,10 @@ Aplicación self-hosted de finanzas personales y de pareja. Firefly III conserva
 
 El repositorio contiene una **beta experimental funcional y desplegable** de OKLE. `PUBLIC_DATA_MODE=local` permite una demostración sin infraestructura y `server` usa identidades, PostgreSQL y Firefly reales. La autenticación integrada admite `AUTH_MODE=local` (predeterminado privado) o `keycloak` (opcional/público):
 
-- PWA responsive e instalable en SvelteKit con Inicio, Movimientos, Bolsillos, Pagos y Más; Plan financiero, Patrimonio, Simuladores, Asesor, Cuentas y Hogar se abren desde Más.
+- PWA responsive e instalable en SvelteKit con Inicio, Movimientos, Bolsillos, Pagos y Más; Calendario, Correcciones, Plan financiero, Patrimonio, Simuladores, Asesor, Cuentas y Hogar se abren desde Más.
 - Service worker con caché de interfaz y navegación visitada; API financiera y autenticación siempre quedan fuera de caché.
 - API NestJS/Fastify con identidad normalizada, sesiones locales opacas en Redis u OIDC/PKCE opcional.
-- PostgreSQL/Prisma con hogares, miembros, bolsillos, eventos, reglas, atribuciones, check-ins e insights.
+- PostgreSQL/Prisma con hogares, miembros, cuentas perfiladas, lotes trazables de bolsillos, eventos, reglas, atribuciones, calendario, notificaciones, check-ins e insights.
 - Bolsillos compartidos por defecto y privados para su propietario.
 - Metas por fecha o por capacidad de aporte.
 - Distribución priorizada de ingresos.
@@ -120,20 +120,26 @@ python3 -m pytest services/ai-cfo/tests -q
 
 ## Contratos principales
 
-- `POST /v1/pockets`: crea un bolsillo; `visibility` es `household` si se omite.
+- `POST /v1/pockets`: crea un bolsillo; `visibility` es `household` si se omite. Un saldo inicial exige motivo y queda como ajuste por conciliar.
+- `POST /v1/pockets/:id/allocate`: reserva desde una cuenta real y conserva cuenta, alcance, aportante e idempotencia.
+- `POST /v1/pockets/:id/release`: libera hacia la cuenta de origen antes de registrar el gasto o pago real.
 - `GET /v1/pockets`: devuelve compartidos más privados propios.
 - `GET /v1/pockets/:id/projection`: calcula el progreso según su política.
 - `POST /v1/pockets/:id/allocate`: registra un evento virtual idempotente.
-- `GET/POST/PATCH/DELETE /v1/accounts`: administra cuentas Firefly por alcance sin exponer PAT al cliente.
+- `GET/POST/PATCH/DELETE /v1/accounts`: administra cuentas Firefly por alcance sin exponer PAT al cliente. Devuelve saldo bancario, reservado y disponible, propietario, emoji y color.
 - `GET/PATCH /v1/household` y `PATCH /v1/profile`: hogar, miembros e identidad visible.
 - `GET /v1/auth/setup-status` y `POST /v1/auth/setup`: alta única del primer hogar.
 - `POST /v1/household/invitations`, `GET /v1/auth/invitations/:token` y `POST /v1/auth/join`: invitación de pareja de un solo uso.
 - `GET/PATCH /v1/integrations` y `POST /v1/integrations/trm/refresh`: preferencias del hogar, TRM y modo Open Finance.
 - `GET /v1/onboarding/status`: diagnóstico seguro de la configuración inicial.
 - `GET/POST/PATCH /v1/planning/*`: fuentes, ingresos esperados, planes, asignaciones e historia de decisiones.
-- `GET/POST/PATCH/DELETE /v1/payments`: pagos, vencimientos, enlaces, referencias y confirmación del bolsillo de origen.
+- `GET/POST/PATCH/DELETE /v1/payments`: pagos, vencimientos, responsable, enlaces, referencias y confirmación desde una cuenta real.
+- `GET /v1/calendar`: movimientos, ingresos esperados y pagos visibles dentro de un rango.
+- `GET/POST/PATCH /v1/notifications`: campana para vencimientos, confirmación de ingresos y uso de cuentas a nombre de otro miembro.
 - `GET/POST/PATCH /v1/patrimony/*`: CDTs, inversiones, inmuebles y cortes históricos del patrimonio.
-- `POST /v1/transactions`: registra en el libro Firefly correcto y guarda su atribución.
+- `POST /v1/transactions`: registra ingresos, gastos o transferencias en el libro Firefly correcto y guarda cuenta de origen, destino y atribución.
+- `PATCH /v1/transactions/:id`: corrige descripción, categoría o naturaleza durante siete días sin reescribir el asiento bancario.
+- `POST /v1/transactions/:id/reverse`: crea un asiento compensatorio idempotente durante la misma ventana; conserva y audita el original.
 - `POST /v1/ingestion/mock-sandbox`: inyecta lotes Open Finance de prueba
   firmados para validar `pending → posted` e idempotencia sin un banco real.
 - `POST /v1/security/private-metadata/rotate`: recifra de forma idempotente los
