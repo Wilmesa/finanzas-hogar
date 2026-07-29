@@ -7,6 +7,32 @@ La aplicación soporta rutas de instalación configurables y dos topologías exp
 
 Para el servidor doméstico actual siga [DEPLOY_PRIVATE_TAILSCALE.md](DEPLOY_PRIVATE_TAILSCALE.md). Esta guía resume los invariantes comunes.
 
+## Migración 202607280002: flujo de caja real y calendario
+
+La migración `202607280002_real_cashflow_calendar_corrections` es aditiva. Crea
+perfiles de cuenta, lotes trazables de financiación de bolsillos y
+notificaciones; agrega cuenta de origen/destino, naturaleza personal/familiar,
+responsable de pago, emoji y color.
+
+Antes de aplicarla:
+
+1. Detenga escrituras y cree un backup cifrado de PostgreSQL y Firefly.
+2. Conserve una copia del `.env` únicamente en el servidor; no la suba a Git.
+3. Genere Prisma Client en la imagen nueva y ejecute las migraciones de
+   producción habituales.
+4. Inicie API, worker y web; compruebe `/health`, Cuentas, Bolsillos y
+   Calendario.
+
+Los saldos de bolsillo que existían antes de esta versión se migran como
+`legacy_unreconciled`: permanecen intactos, pero no se descuentan de una cuenta
+arbitraria. El usuario debe liberarlos o conciliarlos con un motivo. Los pagos
+existentes reciben como responsable a su creador. No se borran movimientos,
+planes, bolsillos ni migraciones anteriores.
+
+En caso de rollback, restaure conjuntamente la imagen y el backup completos
+anteriores. No revierta parcialmente las tablas después de recibir operaciones
+con la versión nueva.
+
 ## Migración 202607270001: interconexiones financieras
 
 Antes de actualizar:

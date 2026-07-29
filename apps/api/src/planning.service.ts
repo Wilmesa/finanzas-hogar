@@ -13,6 +13,7 @@ import {
 import { z } from "zod";
 import type { Actor } from "./auth.js";
 import { PrismaService } from "./prisma.service.js";
+import { AccountsService } from "./accounts.service.js";
 
 const Visibility = z.enum(["household", "private"]);
 const Currency = z
@@ -142,7 +143,10 @@ function jsonSnapshot(value: unknown): Prisma.InputJsonValue {
 
 @Injectable()
 export class PlanningService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accounts: AccountsService,
+  ) {}
 
   private visible(actor: Actor) {
     return {
@@ -683,7 +687,7 @@ export class PlanningService {
       where: { id },
       include: {
         plan: true,
-        expectedIncome: true,
+        expectedIncome: { include: { actualTransaction: true } },
         pocket: true,
         paymentPlan: true,
       },
@@ -726,6 +730,21 @@ export class PlanningService {
         `Solo quedan ${remaining.toString()} por ejecutar en este destino`,
       );
     }
+    const incomeAccountId = allocation.expectedIncome.destinationAccountId;
+    const incomeLedgerScope =
+      allocation.expectedIncome.actualTransaction?.ledgerScope ?? null;
+    if (incomeAccountId && incomeLedgerScope) {
+      const availability = await this.accounts.availableForAllocation(
+        incomeAccountId,
+        incomeLedgerScope,
+        actor,
+      );
+      if (requested.greaterThan(availability.availableAmount)) {
+        throw new BadRequestException(
+          "La cuenta donde llegó el ingreso no tiene disponibilidad suficiente",
+        );
+      }
+    }
     return this.prisma.$transaction(async (tx) => {
       const repeated = await tx.planAuditEvent.findFirst({
         where: {
@@ -746,6 +765,8 @@ export class PlanningService {
             amount: requested,
             currency: allocation.plan.currency,
             planningOnly: true,
+            sourceAccountId: incomeAccountId,
+            sourceLedgerScope: incomeLedgerScope,
             idempotencyKey: key,
             metadata: {
               planId: allocation.planId,
@@ -755,6 +776,20 @@ export class PlanningService {
           },
         });
         pocketEventId = event.id;
+        await tx.pocketFundingLot.create({
+          data: {
+            householdId: actor.householdId,
+            pocketId: allocation.pocket.id,
+            sourceAccountId: incomeAccountId,
+            sourceLedgerScope: incomeLedgerScope,
+            contributorMemberId: actor.memberId,
+            originalAmount: requested,
+            remainingAmount: requested,
+            currency: allocation.plan.currency,
+            origin: incomeAccountId ? "planned_income" : "legacy_unreconciled",
+            reason: `Plan ${allocation.plan.title}, ingreso ${allocation.expectedIncomeId}`,
+          },
+        });
         await tx.pocket.update({
           where: { id: allocation.pocket.id },
           data: {
@@ -851,6 +886,31 @@ export class PlanningService {
         "El plan está sobreasignado y debe revisarse antes de ejecutarlo",
       );
     }
+    const incomeAccountId = income.destinationAccountId;
+    const incomeLedgerScope = income.actualTransaction?.ledgerScope ?? null;
+    const totalPocketAllocation = plan.allocations.reduce((sum, allocation) => {
+      if (!allocation.pocketId) return sum;
+      const projected =
+        preview.allocations.find((item) => item.targetId === allocation.id)
+          ?.amount ?? "0";
+      return sum.plus(projected);
+    }, new Prisma.Decimal(0));
+    if (
+      incomeAccountId &&
+      incomeLedgerScope &&
+      totalPocketAllocation.greaterThan(0)
+    ) {
+      const availability = await this.accounts.availableForAllocation(
+        incomeAccountId,
+        incomeLedgerScope,
+        actor,
+      );
+      if (totalPocketAllocation.greaterThan(availability.availableAmount)) {
+        throw new BadRequestException(
+          "La cuenta donde llegó el ingreso no tiene disponibilidad suficiente para ejecutar el plan",
+        );
+      }
+    }
     return this.prisma.$transaction(async (tx) => {
       const results: Array<{
         allocationId: string;
@@ -875,6 +935,8 @@ export class PlanningService {
               amount,
               currency: plan.currency,
               planningOnly: true,
+              sourceAccountId: incomeAccountId,
+              sourceLedgerScope: incomeLedgerScope,
               idempotencyKey: `${key}:${allocation.id}`,
               metadata: {
                 planId: plan.id,
@@ -884,6 +946,22 @@ export class PlanningService {
             },
           });
           pocketEventId = event.id;
+          await tx.pocketFundingLot.create({
+            data: {
+              householdId: actor.householdId,
+              pocketId: allocation.pocketId,
+              sourceAccountId: incomeAccountId,
+              sourceLedgerScope: incomeLedgerScope,
+              contributorMemberId: actor.memberId,
+              originalAmount: amount,
+              remainingAmount: amount,
+              currency: plan.currency,
+              origin: incomeAccountId
+                ? "planned_income"
+                : "legacy_unreconciled",
+              reason: `Plan ${plan.title}, ingreso ${income.id}`,
+            },
+          });
           await tx.pocket.update({
             where: { id: allocation.pocketId },
             data: {
@@ -947,6 +1025,7 @@ export class PlanningService {
       .object({
         attributionId: z.string().uuid(),
         actualAmount: PositiveMoney,
+        notes: z.string().trim().max(1000).optional(),
       })
       .safeParse(raw);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
@@ -969,7 +1048,11 @@ export class PlanningService {
         status: "received",
         actualAmount: new Prisma.Decimal(parsed.data.actualAmount),
         receivedAt: attribution.occurredAt,
+        destinationAccountId: attribution.destinationAccountId,
         actualTransactionAttributionId: attribution.id,
+        ...(parsed.data.notes !== undefined
+          ? { notes: parsed.data.notes }
+          : {}),
       },
       include: { source: true },
     });
@@ -993,7 +1076,7 @@ export class PlanningService {
   private async expectedIncomeForActor(id: string, actor: Actor) {
     const income = await this.prisma.expectedIncome.findUnique({
       where: { id },
-      include: { source: true },
+      include: { source: true, actualTransaction: true },
     });
     if (!income || !this.canRead(income.source, actor)) {
       throw new NotFoundException();

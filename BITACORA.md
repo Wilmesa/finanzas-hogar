@@ -704,3 +704,82 @@ La actualización del servidor se realizará únicamente después de revisión m
   visibles, TRM actualizada desde SFC y guardado de sincronización diaria.
 - El hogar y las cuentas ficticias creadas para QA se eliminaron al terminar;
   la instalación volvió a quedar vacía para el alta real.
+
+## 2026-07-28 — Flujo de caja por cuenta, calendario y correcciones
+
+### Problema confirmado
+
+- Inicio restaba todos los bolsillos de un saldo global aunque el Pocket Engine
+  no conservaba la cuenta de origen. El resultado podía ser negativo y no era
+  conciliable.
+- Registrar un gasto exigía un bolsillo y descontaba su saldo directamente,
+  mezclando reserva virtual con retiro bancario real.
+- No existía una línea de tiempo unificada ni una campana interna con
+  responsables.
+
+### Implementado
+
+- `AccountProfile` conserva propietario opcional, emoji y color por cuenta.
+- `PocketFundingLot` conserva cuenta y libro de origen, aportante, cantidad
+  original/restante, motivo y tipo de operación.
+- Inicio muestra por cuenta visible: **saldo bancario**, **en bolsillos** y
+  **disponible**. Se eliminó “Disponible después de compromisos”.
+- Aportar exige una cuenta con moneda y disponibilidad suficientes. Saldo
+  inicial y corrección son modos explícitos con motivo.
+- Liberar consume lotes FIFO de la cuenta elegida. Después se registra el gasto
+  o pago real desde esa cuenta. Mover o archivar mantiene la trazabilidad.
+- Los gastos conservan cuenta, pagador y naturaleza `Familiar` o `Personal`, sin
+  alterar bolsillos. Comercio, categoría y naturaleza se corrigen durante siete
+  días con auditoría.
+- Movimientos permite registrar ingresos recibidos y transferencias entre
+  cuentas del mismo libro y moneda. La cuenta privada selecciona correctamente
+  el libro privado de Firefly.
+- **Más → Correcciones** abre directamente los movimientos editables de los
+  últimos siete días. Una reversión crea un movimiento compensatorio
+  idempotente y auditado; el asiento bancario original no se borra ni reescribe.
+- Usar una cuenta perfilada a nombre de la pareja notifica a su propietario.
+- Pagos incluyen responsable. La campana avisa vencimientos a siete días y pide
+  confirmar ingresos previstos del día.
+- Calendario mensual integra movimientos, ingresos y pagos con detalle diario.
+- Conciliar un ingreso conserva la cuenta destino; ejecutar su acuerdo crea
+  reservas financiadas por esa cuenta y rechaza sobreasignaciones.
+- Bolsillos, cuentas y categorías aceptan emoji y color. Saldos históricos sin
+  cuenta se migran sin pérdida como “por conciliar”.
+- Movimientos abren desde la última nómina detectada o el inicio del mes, con
+  análisis por categoría y persona.
+- Configuración ocupa el 100 % del ancho móvil y ya no se comprime al 25 %.
+- La captura real de iPhone confirmó que el contenedor principal, no las
+  tarjetas, se reducía al 25 %. En móvil `.app-shell` deja de depender del grid,
+  y `main`/`.more-page` usan todo el ancho. La prueba a 390 px mide 390 px en
+  `html`, `body`, shell, `main` y página, sin desbordamiento horizontal.
+
+### Migración y estado
+
+- Migración aditiva
+  `202607280002_real_cashflow_calendar_corrections`.
+- El backfill asigna pagos existentes a su creador y conserva reservas antiguas
+  como ajustes no atribuidos; no inventa una cuenta de origen.
+- La migración se aplicó correctamente al entorno Docker local de prueba. No se
+  desplegó ni se modificó ningún servidor externo.
+
+### Verificación final
+
+- `CI=true pnpm install --frozen-lockfile`: correcto.
+- `CI=true pnpm db:generate`: cliente Prisma generado sin ensuciar Git.
+- `CI=true pnpm verify`: correcto; TypeScript de dominio/API y Svelte con
+  0 errores y 0 advertencias, API 62/62, dominio 24/24, web 2/2 y operaciones
+  18/18, además de builds y formato.
+- `python3 -m pytest services/ai-cfo/tests -q`: 7/7 aprobadas.
+- Build Docker de `web`, `api` y `ai-cfo`: correcto.
+- Compose privado, público y n8n opcional: configuraciones válidas; n8n solo
+  aparece al habilitarlo con secretos efímeros de prueba.
+- Migración Prisma aplicada: 11 migraciones reconocidas y
+  `202607280002_real_cashflow_calendar_corrections` aplicada correctamente.
+- Smoke test a través de Caddy:
+  `GET http://127.0.0.1:3100/api/health` devolvió `status: ok`.
+- Los siete servicios del despliegue privado quedaron saludables: gateway,
+  web, api, ai-cfo, PostgreSQL, Redis y Firefly III.
+- QA de producción a 390 × 844: Inicio, Bolsillos, Calendario y Más usan todo el
+  ancho. `body`, `main` y `.more-page` miden 390 px.
+- Búsqueda de secretos: sin llaves privadas, tokens o contraseñas nuevas; el
+  único archivo de entorno versionado continúa siendo `.env.example`.

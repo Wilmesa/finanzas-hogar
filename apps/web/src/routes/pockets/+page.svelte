@@ -4,6 +4,7 @@
     archivePocket,
     createPocket,
     financeData,
+    releaseFromPocket,
     setPocketStatus,
     transferBetweenPockets,
     updatePocket,
@@ -19,11 +20,19 @@
   let targetDate = $state("");
   let monthlyContribution = $state<number | undefined>();
   let privatePocket = $state(false);
+  let pocketIcon = $state("💰");
+  let pocketColor = $state("#123C69");
   let currencyCode = $state("COP");
   let saving = $state(false);
   let error = $state("");
   let allocatingPocketId = $state<string | null>(null);
   let allocationAmount = $state<number | undefined>();
+  let allocationAccountId = $state("");
+  let allocationMode = $state<"account" | "initial_adjustment" | "correction">("account");
+  let allocationReason = $state("");
+  let releasingPocketId = $state<string | null>(null);
+  let releaseAmount = $state<number | undefined>();
+  let releaseAccountId = $state("");
   let actionError = $state("");
   let movingPocketId = $state<string | null>(null);
   let moveDestinationPocketId = $state("");
@@ -36,6 +45,8 @@
   let editTargetDate = $state("");
   let editMonthlyContribution = $state<number | undefined>();
   let editPrivate = $state(false);
+  let editIcon = $state("💰");
+  let editColor = $state("#123C69");
   let archivingPocket = $state<PocketView | null>(null);
   let archiveDisposition = $state<"transfer" | "release">("transfer");
   let destinationPocketId = $state("");
@@ -61,6 +72,8 @@
       await createPocket({
         name: name.trim(), observations: observations.trim(), visibility: privatePocket ? "private" : "household", currency: currencyCode,
         targetAmount, policyKind, targetDate: targetDate || undefined, monthlyContribution,
+        icon: pocketIcon,
+        color: pocketColor,
       });
       name = "";
       observations = "";
@@ -68,6 +81,8 @@
       targetDate = "";
       monthlyContribution = undefined;
       privatePocket = false;
+      pocketIcon = "💰";
+      pocketColor = "#123C69";
       creating = false;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "No fue posible crear el bolsillo";
@@ -78,9 +93,56 @@
 
   async function applyAllocation() {
     if (!allocatingPocketId || !allocationAmount || allocationAmount <= 0) return;
-    await allocateToPocket(allocatingPocketId, allocationAmount);
-    allocatingPocketId = null;
+    actionError = "";
+    try {
+      await allocateToPocket(
+        allocatingPocketId,
+        allocationAmount,
+        allocationAccountId,
+        allocationMode,
+        allocationReason,
+      );
+      allocatingPocketId = null;
+      allocationAmount = undefined;
+      allocationAccountId = "";
+      allocationReason = "";
+      allocationMode = "account";
+    } catch (cause) {
+      actionError = cause instanceof Error ? cause.message : "No fue posible reservar el dinero";
+    }
+  }
+
+  function beginAllocation(pocket: PocketView) {
+    allocatingPocketId = pocket.id;
     allocationAmount = undefined;
+    allocationMode = "account";
+    allocationReason = "";
+    allocationAccountId =
+      $financeData.accounts.find(
+        (account) =>
+          account.currency === pocket.currency && account.availableBalance > 0,
+      )?.id ?? "";
+  }
+
+  function beginRelease(pocket: PocketView) {
+    releasingPocketId = pocket.id;
+    releaseAmount = undefined;
+    releaseAccountId =
+      pocket.fundingLots?.find((lot) => lot.sourceAccountId)?.sourceAccountId ??
+      "";
+  }
+
+  async function releaseReservation() {
+    if (!releasingPocketId || !releaseAmount || releaseAmount <= 0 || !releaseAccountId) return;
+    actionError = "";
+    try {
+      await releaseFromPocket(releasingPocketId, releaseAmount, releaseAccountId);
+      releasingPocketId = null;
+      releaseAmount = undefined;
+      releaseAccountId = "";
+    } catch (cause) {
+      actionError = cause instanceof Error ? cause.message : "No fue posible liberar el dinero";
+    }
   }
 
   async function changeStatus(pocket: (typeof pockets)[number], status: "active" | "paused" | "archived") {
@@ -127,6 +189,8 @@
     editTargetDate = pocket.targetDate ?? "";
     editMonthlyContribution = pocket.monthlyContribution;
     editPrivate = pocket.visibility === "private";
+    editIcon = pocket.icon;
+    editColor = pocket.color;
   }
 
   async function saveEdit() {
@@ -142,6 +206,8 @@
         policyKind: editPolicyKind,
         targetDate: editTargetDate || undefined,
         monthlyContribution: editMonthlyContribution,
+        icon: editIcon,
+        color: editColor,
       });
       editingPocket = null;
     } catch (cause) {
@@ -202,6 +268,8 @@
       <header><div><span class="eyebrow">Nuevo propósito</span><h2>Crea un bolsillo</h2></div><span class="privacy-default">Compartido por defecto</span></header>
       <div class="form-grid">
         <label>Nombre<input placeholder="Ej. Fondo de emergencia" bind:value={name} /></label>
+        <label>Emoji<input maxlength="16" placeholder="💰" bind:value={pocketIcon} /></label>
+        <label>Color<input type="color" bind:value={pocketColor} /></label>
         <label class="wide-field">Observaciones (opcional)<textarea bind:value={observations} maxlength="1000" placeholder="Anota para qué usarán este bolsillo o cualquier acuerdo importante"></textarea></label>
         <label>¿Cuánto necesitas?<input inputmode="decimal" type="number" min="1" placeholder="0" bind:value={targetAmount} /></label>
         <label>Moneda<select bind:value={currencyCode}><option>COP</option><option>USD</option><option>EUR</option></select></label>
@@ -215,7 +283,7 @@
     </section>
   {/if}
   {#if actionError}<p class="form-error" role="alert">{actionError}</p>{/if}
-  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} /><div class="pocket-actions"><button onclick={() => (allocatingPocketId = pocket.id)}>Aportar</button><button disabled={pocket.currentAmount <= 0} onclick={() => beginMove(pocket)}>Mover</button><button onclick={() => beginEdit(pocket)}>Editar</button><button onclick={() => changeStatus(pocket, pocket.status === "paused" ? "active" : "paused")}>{pocket.status === "paused" ? "Reanudar" : "Pausar"}</button><button class="danger-text" onclick={() => beginArchive(pocket)}>Archivar</button></div></div>{/each}</div>
+  <div class="pocket-grid full">{#each visible as pocket}<div class="pocket-with-action"><PocketCard {pocket} />{#if (pocket.unreconciledAmount ?? 0) > 0}<p class="reconciliation-warning">⚠ {pocket.unreconciledAmount?.toLocaleString("es-CO")} {pocket.currency} por conciliar: no se restan de ninguna cuenta.</p>{/if}<div class="pocket-actions"><button onclick={() => beginAllocation(pocket)}>Reservar desde cuenta</button><button disabled={pocket.currentAmount <= 0} onclick={() => beginRelease(pocket)}>Liberar</button><button disabled={pocket.currentAmount <= 0} onclick={() => beginMove(pocket)}>Mover</button><button onclick={() => beginEdit(pocket)}>Editar</button><button onclick={() => changeStatus(pocket, pocket.status === "paused" ? "active" : "paused")}>{pocket.status === "paused" ? "Reanudar" : "Pausar"}</button><button class="danger-text" onclick={() => beginArchive(pocket)}>Archivar</button></div></div>{/each}</div>
   {#if visible.length === 0}<div class="empty-state panel"><strong>No hay bolsillos en esta vista</strong><p>Crea uno compartido o privado para reservar dinero con propósito.</p></div>{/if}
   <button class="fab mobile-only" onclick={() => (creating = !creating)}><span>＋</span> Nuevo</button>
 </div>
@@ -225,8 +293,26 @@
     <div class="quick-entry compact" role="dialog" aria-modal="true" aria-labelledby="allocation-title">
       <header><div><span class="eyebrow">Reserva virtual</span><h2 id="allocation-title">Aportar a {pockets.find((pocket) => pocket.id === allocatingPocketId)?.name}</h2></div><button class="icon-button" onclick={() => (allocatingPocketId = null)} aria-label="Cerrar">×</button></header>
       <label>Cantidad<input type="number" min="1" bind:value={allocationAmount} /></label>
-      <p class="privacy-note">Este aporte reserva dinero dentro de la app; no crea una transferencia bancaria.</p>
+      <label>Tipo de registro<select bind:value={allocationMode}><option value="account">Reservar dinero de una cuenta</option><option value="initial_adjustment">Registrar saldo que ya existía</option><option value="correction">Corregir una reserva</option></select></label>
+      {#if allocationMode === "account"}
+        <label>Cuenta de origen<select bind:value={allocationAccountId}><option value="">Seleccionar…</option>{#each $financeData.accounts.filter((account) => account.currency === pockets.find((pocket) => pocket.id === allocatingPocketId)?.currency) as account}<option value={account.id}>{account.icon} {account.name} · disponible {account.availableBalance.toLocaleString("es-CO")} {account.currency}</option>{/each}</select></label>
+      {:else}
+        <label>Motivo obligatorio<textarea maxlength="500" bind:value={allocationReason} placeholder="Ej. saldo previo al comenzar a usar OKLE"></textarea></label>
+      {/if}
+      <p class="privacy-note">Reservar no mueve dinero en el banco: reduce lo disponible de la cuenta elegida y conserva la trazabilidad.</p>
       <button class="primary-button" onclick={applyAllocation}>Guardar aporte</button>
+    </div>
+  </div>
+{/if}
+
+{#if releasingPocketId}
+  <div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && (releasingPocketId = null)}>
+    <div class="quick-entry compact" role="dialog" aria-modal="true" aria-labelledby="release-title">
+      <header><div><span class="eyebrow">Volver a usar el dinero</span><h2 id="release-title">Liberar reserva</h2></div><button class="icon-button" onclick={() => (releasingPocketId = null)} aria-label="Cerrar">×</button></header>
+      <label>Cantidad<input type="number" min="1" max={pockets.find((pocket) => pocket.id === releasingPocketId)?.currentAmount} bind:value={releaseAmount} /></label>
+      <label>Cuenta de origen<select bind:value={releaseAccountId}><option value="">Seleccionar…</option>{#each $financeData.accounts.filter((account) => pockets.find((pocket) => pocket.id === releasingPocketId)?.fundingLots?.some((lot) => lot.sourceAccountId === account.id && lot.remainingAmount > 0)) as account}<option value={account.id}>{account.icon} {account.name}</option>{/each}</select></label>
+      <p class="privacy-note">El dinero vuelve a estar disponible en su cuenta real. Después puedes registrar el pago o gasto desde esa cuenta.</p>
+      <button class="primary-button" onclick={releaseReservation}>Liberar dinero</button>
     </div>
   </div>
 {/if}
@@ -249,6 +335,8 @@
       <header><div><span class="eyebrow">Cambios trazables</span><h2 id="edit-pocket-title">Editar bolsillo</h2></div><button class="icon-button" onclick={() => (editingPocket = null)} aria-label="Cerrar">×</button></header>
       <div class="form-grid">
         <label>Nombre<input bind:value={editName} /></label>
+        <label>Emoji<input maxlength="16" bind:value={editIcon} /></label>
+        <label>Color<input type="color" bind:value={editColor} /></label>
         <label class="wide-field">Observaciones (opcional)<textarea bind:value={editObservations} maxlength="1000" placeholder="Para qué existe este bolsillo o qué acordaron"></textarea></label>
         <label>Meta o límite<input type="number" min="1" bind:value={editTargetAmount} /></label>
         <label>Regla<select bind:value={editPolicyKind}><option value="target_by_date">Meta por fecha</option><option value="target_by_contribution">Meta por aporte</option><option value="periodic_spend">Límite mensual</option></select></label>

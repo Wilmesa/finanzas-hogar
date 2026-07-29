@@ -11,7 +11,7 @@ import { PrismaService } from "./prisma.service.js";
 
 const CategoryInput = z.object({
   name: z.string().trim().min(1).max(60),
-  icon: z.string().trim().min(1).max(40).default("tag"),
+  icon: z.string().trim().min(1).max(40).default("🏷️"),
   color: z
     .string()
     .regex(/^#[0-9A-F]{6}$/i)

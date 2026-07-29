@@ -57,6 +57,142 @@ describe("TransactionsService idempotency", () => {
     expect(firefly.listAssetAccounts).not.toHaveBeenCalled();
   });
 
+  it("usa el libro privado cuando la cuenta elegida es privada", async () => {
+    const pending = {
+      id: "private-pending",
+      syncStatus: "processing",
+    };
+    const synchronized = {
+      ...pending,
+      fireflyTransactionId: "firefly-private-1",
+      syncStatus: "synchronized",
+    };
+    const tx = {
+      transactionAttribution: {
+        update: vi.fn(async () => synchronized),
+        upsert: vi.fn(),
+      },
+      accountProfile: { findUnique: vi.fn() },
+      appNotification: { create: vi.fn() },
+    };
+    const prisma = {
+      transactionAttribution: {
+        findUnique: vi.fn(async () => null),
+        upsert: vi.fn(async () => pending),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        update: vi.fn(),
+      },
+      member: { findFirst: vi.fn(async () => ({ id: actor.memberId })) },
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    };
+    const firefly = {
+      listAssetAccounts: vi.fn(async () => [
+        { id: "private-account", currency: "COP" },
+      ]),
+      createTransaction: vi.fn(async () => ({
+        data: { id: "firefly-private-1" },
+      })),
+    };
+    const privateMetadata = { seal: vi.fn(() => "sealed") };
+    const service = new TransactionsService(
+      prisma as never,
+      firefly as never,
+      privateMetadata as never,
+    );
+
+    await service.create(
+      {
+        type: "withdrawal",
+        amount: "12000",
+        currency: "COP",
+        description: "Gasto privado",
+        category: "Personal",
+        sourceId: "private-account",
+        occurredAt: "2026-07-27T10:00:00.000Z",
+        fundingSourceScope: "private",
+      },
+      "private-command",
+      actor,
+    );
+
+    expect(firefly.listAssetAccounts).toHaveBeenCalledWith(
+      "private",
+      actor.memberId,
+    );
+    expect(firefly.createTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      "private",
+      actor.memberId,
+    );
+    expect(prisma.transactionAttribution.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          ledgerScope: "private",
+          sourceAccountId: "private-account",
+        }),
+      }),
+    );
+  });
+
+  it("revierte con un asiento compensatorio y conserva el original", async () => {
+    const existing = {
+      id: "original-withdrawal",
+      householdId: actor.householdId,
+      ledgerScope: "household",
+      payerMemberId: actor.memberId,
+      merchant: "Compra reversada",
+      category: "Mercado",
+      amount: new Prisma.Decimal("45000"),
+      currency: "COP",
+      transactionType: "withdrawal",
+      spendingNature: "household",
+      sourceAccountId: "account-1",
+      destinationAccountId: null,
+      syncStatus: "synchronized",
+      occurredAt: new Date(),
+    };
+    const prisma = {
+      transactionAttribution: {
+        findFirst: vi.fn(async () => existing),
+      },
+      auditLog: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async () => ({})),
+      },
+    };
+    const service = new TransactionsService(prisma as never, {} as never);
+    const create = vi
+      .spyOn(service, "create")
+      .mockResolvedValue({ id: "reversal-deposit" } as never);
+
+    await expect(
+      service.reverse("original-withdrawal", "reverse-command", actor),
+    ).resolves.toEqual({
+      originalId: "original-withdrawal",
+      reversalId: "reversal-deposit",
+      replayed: false,
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "deposit",
+        amount: "45000",
+        destinationId: "account-1",
+      }),
+      "reversal:original-withdrawal",
+      actor,
+    );
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        entityId: "original-withdrawal",
+        action: "reversed",
+        after: {
+          reversalId: "reversal-deposit",
+          commandIdempotencyKey: "reverse-command",
+        },
+      }),
+    });
+  });
+
   it("revela metadatos privados solo en la bandeja del propietario", async () => {
     const prisma = {
       transactionAttribution: {
@@ -93,7 +229,7 @@ describe("TransactionsService idempotency", () => {
     ]);
   });
 
-  it("reasigna el impacto del gasto y mantiene privada la categoría revisada", async () => {
+  it("reclasifica el gasto sin alterar reservas y mantiene privada la categoría", async () => {
     const oldPocketId = "11111111-1111-4111-8111-111111111111";
     const newPocketId = "22222222-2222-4222-8222-222222222222";
     const existing = {
@@ -183,25 +319,8 @@ describe("TransactionsService idempotency", () => {
         }),
       }),
     );
-    expect(pocketEventCreate).toHaveBeenCalledTimes(2);
-    expect(pocketUpdate).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        where: { id: oldPocketId },
-        data: expect.objectContaining({
-          currentAmount: { increment: existing.amount },
-        }),
-      }),
-    );
-    expect(pocketUpdate).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        where: { id: newPocketId },
-        data: expect.objectContaining({
-          currentAmount: { decrement: existing.amount },
-        }),
-      }),
-    );
+    expect(pocketEventCreate).not.toHaveBeenCalled();
+    expect(pocketUpdate).not.toHaveBeenCalled();
   });
 
   it("re-encripta únicamente el historial privado del miembro actual", async () => {

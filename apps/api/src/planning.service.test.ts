@@ -49,7 +49,7 @@ describe("PlanningService expected-income corrections", () => {
       planFundingAllocation: { findFirst: vi.fn(async () => null) },
       auditLog: { create: vi.fn(async () => ({})) },
     };
-    const service = new PlanningService(prisma as never);
+    const service = new PlanningService(prisma as never, {} as never);
 
     await service.updateExpectedIncome(
       existing.id,
@@ -74,7 +74,7 @@ describe("PlanningService expected-income corrections", () => {
       planFundingAllocation: { findFirst: vi.fn(async () => null) },
       auditLog: { create: vi.fn(async () => ({})) },
     };
-    const service = new PlanningService(prisma as never);
+    const service = new PlanningService(prisma as never, {} as never);
 
     await service.cancelExpectedIncome(existing.id, actor);
 

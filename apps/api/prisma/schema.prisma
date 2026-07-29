@@ -57,6 +57,11 @@ enum TransactionOrigin {
   OFFLINE_SYNC
 }
 
+enum SpendingNature {
+  household
+  personal
+}
+
 enum SimulationKind {
   savings
   debt
@@ -105,6 +110,9 @@ model Household {
   debts                 DebtAccount[]
   invitations           HouseholdInvitation[]
   integrationPreference IntegrationPreference?
+  accountProfiles       AccountProfile[]
+  pocketFundingLots     PocketFundingLot[]
+  notifications         AppNotification[]
 }
 
 model LocalUser {
@@ -152,6 +160,10 @@ model Member {
   investments        InvestmentPosition[]     @relation("InvestmentOwner")
   propertyAssets     PropertyAsset[]          @relation("PropertyOwner")
   invitationsCreated HouseholdInvitation[]    @relation("InvitationCreator")
+  accountProfiles    AccountProfile[]         @relation("AccountOwner")
+  fundingLots        PocketFundingLot[]       @relation("FundingContributor")
+  assignedPayments   PaymentPlan[]            @relation("PaymentResponsible")
+  notifications      AppNotification[]        @relation("NotificationRecipient")
 
   @@unique([householdId, email])
   @@index([householdId])
@@ -237,6 +249,8 @@ model Pocket {
   purpose            PocketPurpose
   name               String
   notes              String?
+  icon               String                   @default("💰")
+  color              String                   @default("#123C69")
   currency           String
   policy             Json
   currentAmount      Decimal                  @default(0) @db.Decimal(30, 8)
@@ -253,6 +267,7 @@ model Pocket {
   fundingAllocations PlanFundingAllocation[]
   paymentOccurrences PaymentOccurrence[]      @relation("PaymentSourcePocket")
   investments        InvestmentPosition[]
+  fundingLots        PocketFundingLot[]
 
   @@index([householdId, visibility, status])
   @@index([ownerMemberId, visibility])
@@ -268,6 +283,9 @@ model PocketEvent {
   currency             String
   planningOnly         Boolean         @default(true)
   fireflyTransactionId String?
+  sourceAccountId      String?
+  sourceLedgerScope    LedgerScope?
+  correctionReason     String?
   idempotencyKey       String
   metadata             Json?
   createdAt            DateTime        @default(now())
@@ -305,6 +323,9 @@ model TransactionAttribution {
   merchant                  String?
   amount                    Decimal              @db.Decimal(30, 8)
   transactionType           String               @default("withdrawal")
+  spendingNature            SpendingNature       @default(household)
+  sourceAccountId           String?
+  destinationAccountId      String?
   currency                  String
   occurredAt                DateTime
   idempotencyKey            String
@@ -492,6 +513,7 @@ model ExpectedIncome {
   reason                         String
   notes                          String?
   receivedAt                     DateTime?
+  destinationAccountId           String?
   actualTransactionAttributionId String?                 @unique
   createdAt                      DateTime                @default(now())
   updatedAt                      DateTime                @updatedAt
@@ -580,31 +602,34 @@ model PlanFundingAllocation {
 }
 
 model PaymentPlan {
-  id                 String                  @id @default(uuid())
-  householdId        String
-  ownerMemberId      String
-  visibility         PocketVisibility        @default(household)
-  name               String
-  type               String
-  currency           String
-  totalAmount        Decimal?                @db.Decimal(30, 8)
-  estimatedAmount    Decimal?                @db.Decimal(30, 8)
-  recurrence         String                  @default("monthly")
-  dueDay             Int?
-  nextDueDate        DateTime?               @db.Date
-  paymentUrl         String?
-  reference          String?
-  notes              String?
-  status             String                  @default("active")
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
-  household          Household               @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  owner              Member                  @relation("PaymentOwner", fields: [ownerMemberId], references: [id])
-  occurrences        PaymentOccurrence[]
-  fundingAllocations PlanFundingAllocation[]
+  id                  String                  @id @default(uuid())
+  householdId         String
+  ownerMemberId       String
+  responsibleMemberId String?
+  visibility          PocketVisibility        @default(household)
+  name                String
+  type                String
+  currency            String
+  totalAmount         Decimal?                @db.Decimal(30, 8)
+  estimatedAmount     Decimal?                @db.Decimal(30, 8)
+  recurrence          String                  @default("monthly")
+  dueDay              Int?
+  nextDueDate         DateTime?               @db.Date
+  paymentUrl          String?
+  reference           String?
+  notes               String?
+  status              String                  @default("active")
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  household           Household               @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  owner               Member                  @relation("PaymentOwner", fields: [ownerMemberId], references: [id])
+  responsible         Member?                 @relation("PaymentResponsible", fields: [responsibleMemberId], references: [id])
+  occurrences         PaymentOccurrence[]
+  fundingAllocations  PlanFundingAllocation[]
 
   @@index([householdId, visibility, status, nextDueDate])
   @@index([ownerMemberId, visibility])
+  @@index([responsibleMemberId, status, nextDueDate])
 }
 
 model PaymentOccurrence {
@@ -627,6 +652,64 @@ model PaymentOccurrence {
 
   @@unique([paymentPlanId, dueDate])
   @@index([householdId, dueDate, status])
+}
+
+model AccountProfile {
+  id               String      @id @default(uuid())
+  householdId      String
+  fireflyAccountId String
+  ledgerScope      LedgerScope
+  ownerMemberId    String?
+  icon             String      @default("🏦")
+  color            String      @default("#123C69")
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  household        Household   @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  owner            Member?     @relation("AccountOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+
+  @@unique([householdId, ledgerScope, fireflyAccountId])
+  @@index([householdId, ownerMemberId, ledgerScope])
+}
+
+model PocketFundingLot {
+  id                  String       @id @default(uuid())
+  householdId         String
+  pocketId            String
+  sourceAccountId     String?
+  sourceLedgerScope   LedgerScope?
+  contributorMemberId String
+  originalAmount      Decimal      @db.Decimal(30, 8)
+  remainingAmount     Decimal      @db.Decimal(30, 8)
+  currency            String
+  origin              String       @default("account")
+  reason              String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  household           Household    @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  pocket              Pocket       @relation(fields: [pocketId], references: [id], onDelete: Cascade)
+  contributor         Member       @relation("FundingContributor", fields: [contributorMemberId], references: [id])
+
+  @@index([householdId, sourceLedgerScope, sourceAccountId, remainingAmount])
+  @@index([pocketId, remainingAmount, createdAt])
+}
+
+model AppNotification {
+  id                String    @id @default(uuid())
+  householdId       String
+  recipientMemberId String
+  type              String
+  title             String
+  message           String
+  entityType        String?
+  entityId          String?
+  status            String    @default("unread")
+  createdAt         DateTime  @default(now())
+  readAt            DateTime?
+  household         Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  recipient         Member    @relation("NotificationRecipient", fields: [recipientMemberId], references: [id], onDelete: Cascade)
+
+  @@index([recipientMemberId, status, createdAt])
+  @@index([householdId, entityType, entityId])
 }
 
 model InvestmentPosition {

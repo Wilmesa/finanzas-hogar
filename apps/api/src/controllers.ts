@@ -35,6 +35,8 @@ import { RemindersService } from "./reminders.service.js";
 import { HouseholdService } from "./household.service.js";
 import { HouseholdAccessService } from "./household-access.service.js";
 import { IntegrationsService } from "./integrations.service.js";
+import { AccountsService } from "./accounts.service.js";
+import { CalendarService } from "./calendar.service.js";
 import { CategoriesService } from "./categories.service.js";
 import { PaymentsService } from "./payments.service.js";
 import { PatrimonyService } from "./patrimony.service.js";
@@ -162,12 +164,34 @@ export class PocketsController {
   @Post(":id/allocate")
   allocate(
     @Param("id") id: string,
-    @Body() body: { amount?: string },
+    @Body()
+    body: {
+      amount?: string;
+      sourceAccountId?: string;
+      sourceLedgerScope?: "household" | "private";
+      mode?: "account" | "initial_adjustment" | "correction";
+      reason?: string;
+    },
     @Headers("idempotency-key") key: string | undefined,
     @CurrentActor() actor: Actor,
   ) {
     if (!key) throw new BadRequestException("Idempotency-Key es obligatorio");
     return this.pockets.allocate(id, body, key, actor);
+  }
+
+  @Post(":id/release")
+  release(
+    @Param("id") id: string,
+    @Body()
+    body: {
+      amount?: string;
+      targetAccountId?: string;
+      targetLedgerScope?: "household" | "private";
+    },
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.pockets.release(id, body, key ?? "", actor);
   }
 
   @Post(":id/transfer")
@@ -340,28 +364,11 @@ export class SimulationsController {
 
 @Controller("v1/accounts")
 export class AccountsController {
-  constructor(private readonly firefly: FireflyClient) {}
+  constructor(private readonly accounts: AccountsService) {}
 
   @Get()
-  async list(@CurrentActor() actor: Actor) {
-    const results = await Promise.allSettled([
-      this.firefly.listAssetAccounts("household", actor.memberId),
-      this.firefly.listAssetAccounts("private", actor.memberId),
-    ]);
-    const scopes = ["household", "private"] as const;
-    return {
-      accounts: results.flatMap((result) =>
-        result.status === "fulfilled" ? result.value : [],
-      ),
-      connections: results.map((result, index) => ({
-        scope: scopes[index],
-        configured: this.firefly.hasToken(scopes[index]!, actor.memberId),
-        status: result.status === "fulfilled" ? "available" : "unavailable",
-        ...(result.status === "rejected"
-          ? { message: "Este libro no está disponible en este momento" }
-          : {}),
-      })),
-    };
+  list(@CurrentActor() actor: Actor) {
+    return this.accounts.list(actor);
   }
 
   private scope(value: string): "household" | "private" {
@@ -389,6 +396,9 @@ export class AccountsController {
       scope?: string;
       openingBalance?: string;
       openingBalanceDate?: string;
+      ownerMemberId?: string | null;
+      icon?: string;
+      color?: string;
     },
     @CurrentActor() actor: Actor,
   ) {
@@ -397,11 +407,17 @@ export class AccountsController {
         "Nombre, tipo, moneda y alcance son obligatorios",
       );
     }
-    return this.firefly.createAccount(
+    return this.accounts.create(
       {
         name: body.name,
         type: body.type,
         currency: body.currency,
+        scope: this.scope(body.scope),
+        ...(body.ownerMemberId !== undefined
+          ? { ownerMemberId: body.ownerMemberId }
+          : {}),
+        ...(body.icon !== undefined ? { icon: body.icon } : {}),
+        ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.openingBalance !== undefined
           ? { openingBalance: body.openingBalance }
           : {}),
@@ -409,8 +425,7 @@ export class AccountsController {
           ? { openingBalanceDate: body.openingBalanceDate }
           : {}),
       },
-      this.scope(body.scope),
-      actor.memberId,
+      actor,
     );
   }
 
@@ -418,15 +433,17 @@ export class AccountsController {
   update(
     @Param("scope") scope: string,
     @Param("id") id: string,
-    @Body() body: { name?: string; currency?: string },
+    @Body()
+    body: {
+      name?: string;
+      currency?: string;
+      ownerMemberId?: string | null;
+      icon?: string;
+      color?: string;
+    },
     @CurrentActor() actor: Actor,
   ) {
-    return this.firefly.updateAccount(
-      id,
-      body,
-      this.scope(scope),
-      actor.memberId,
-    );
+    return this.accounts.update(id, this.scope(scope), body, actor);
   }
 
   @Delete(":scope/:id")
@@ -435,12 +452,57 @@ export class AccountsController {
     @Param("id") id: string,
     @CurrentActor() actor: Actor,
   ) {
-    return this.firefly.archiveAccount(id, this.scope(scope), actor.memberId);
+    return this.accounts.archive(id, this.scope(scope), actor);
   }
 
   @Post(":scope/test")
   test(@Param("scope") scope: string, @CurrentActor() actor: Actor) {
-    return this.firefly.testConnection(this.scope(scope), actor.memberId);
+    return this.accounts.test(this.scope(scope), actor);
+  }
+}
+
+@Controller("v1/calendar")
+export class CalendarController {
+  constructor(private readonly calendarService: CalendarService) {}
+
+  @Get()
+  calendar(
+    @Query("from") from: string | undefined,
+    @Query("to") to: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    const now = new Date();
+    const fallbackFrom = new Date(now.getFullYear(), now.getMonth(), 1)
+      .toISOString()
+      .slice(0, 10);
+    const fallbackTo = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      .toISOString()
+      .slice(0, 10);
+    return this.calendarService.calendar(
+      actor,
+      from ?? fallbackFrom,
+      to ?? fallbackTo,
+    );
+  }
+}
+
+@Controller("v1/notifications")
+export class NotificationsController {
+  constructor(private readonly calendarService: CalendarService) {}
+
+  @Get()
+  list(@CurrentActor() actor: Actor) {
+    return this.calendarService.listNotifications(actor);
+  }
+
+  @Post("refresh")
+  refresh(@CurrentActor() actor: Actor) {
+    return this.calendarService.refreshNotifications(actor);
+  }
+
+  @Patch(":id/read")
+  read(@Param("id") id: string, @CurrentActor() actor: Actor) {
+    return this.calendarService.readNotification(id, actor);
   }
 }
 
@@ -599,6 +661,15 @@ export class TransactionsController {
     @CurrentActor() actor: Actor,
   ) {
     return this.transactions.update(id, body, actor);
+  }
+
+  @Post(":id/reverse")
+  reverse(
+    @Param("id") id: string,
+    @Headers("idempotency-key") key: string | undefined,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.transactions.reverse(id, key ?? "", actor);
   }
 }
 

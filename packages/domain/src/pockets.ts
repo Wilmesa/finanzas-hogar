@@ -57,6 +57,11 @@ export const CreatePocketSchema = z.object({
   name: z.string().trim().min(1).max(80),
   purpose: PocketPurposeSchema.default("custom"),
   notes: z.string().trim().max(1000).optional(),
+  icon: z.string().trim().min(1).max(16).default("💰"),
+  color: z
+    .string()
+    .regex(/^#[0-9A-F]{6}$/i)
+    .default("#123C69"),
   visibility: PocketVisibilitySchema.default("household"),
   currency: z
     .string()
@@ -64,6 +69,7 @@ export const CreatePocketSchema = z.object({
     .length(3)
     .transform((value) => value.toUpperCase()),
   currentAmount: NonNegativeAmount.default("0"),
+  initialBalanceReason: z.string().trim().min(3).max(500).optional(),
   rolloverPolicy: z
     .enum(["none", "carry_balance", "carry_deficit"])
     .default("carry_balance"),
@@ -72,6 +78,7 @@ export const CreatePocketSchema = z.object({
 
 export const UpdatePocketSchema = CreatePocketSchema.omit({
   currentAmount: true,
+  initialBalanceReason: true,
 })
   .partial()
   .extend({

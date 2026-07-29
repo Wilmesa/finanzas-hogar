@@ -6,6 +6,7 @@ import {
   AllocationController,
   AiCfoController,
   AccountsController,
+  CalendarController,
   AnalyticsController,
   AutomationController,
   CategoriesController,
@@ -14,6 +15,7 @@ import {
   HouseholdController,
   InsightsController,
   NewsController,
+  NotificationsController,
   PlanningController,
   PocketsController,
   PaymentsController,
@@ -54,6 +56,8 @@ import { TransactionRulesService } from "./transaction-rules.service.js";
 import { MockOpenFinanceAdapter } from "./mock-open-finance.adapter.js";
 import { HouseholdAccessService } from "./household-access.service.js";
 import { IntegrationsService } from "./integrations.service.js";
+import { AccountsService } from "./accounts.service.js";
+import { CalendarService } from "./calendar.service.js";
 
 @Module({
   controllers: [
@@ -63,6 +67,8 @@ import { IntegrationsService } from "./integrations.service.js";
     PaymentsController,
     PatrimonyController,
     AccountsController,
+    CalendarController,
+    NotificationsController,
     PlanningController,
     ProjectionsController,
     SimulationsController,
@@ -87,6 +93,8 @@ import { IntegrationsService } from "./integrations.service.js";
   ],
   providers: [
     PrismaService,
+    AccountsService,
+    CalendarService,
     PocketsService,
     TransactionsService,
     FireflyClient,

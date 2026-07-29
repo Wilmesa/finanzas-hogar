@@ -18,6 +18,9 @@
   let currencyCode = $state("COP");
   let scope = $state<"household" | "private">("household");
   let openingBalance = $state<number | undefined>();
+  let ownerMemberId = $state<string | null>(null);
+  let icon = $state("🏦");
+  let color = $state("#123C69");
 
   function openCreate(selectedScope: "household" | "private" = "household") {
     editing = null;
@@ -26,6 +29,9 @@
     currencyCode = "COP";
     scope = selectedScope;
     openingBalance = undefined;
+    ownerMemberId = null;
+    icon = "🏦";
+    color = "#123C69";
     creating = true;
     error = "";
   }
@@ -35,6 +41,9 @@
     name = account.name;
     currencyCode = account.currency;
     scope = account.scope;
+    ownerMemberId = account.ownerMemberId ?? null;
+    icon = account.icon;
+    color = account.color;
     creating = true;
     error = "";
   }
@@ -48,13 +57,16 @@
     saving = true;
     try {
       if (editing) {
-        await updateAccount(editing, { name: name.trim(), currency: currencyCode });
+        await updateAccount(editing, { name: name.trim(), currency: currencyCode, ownerMemberId, icon, color });
         message = "Cuenta actualizada en Firefly.";
       } else {
         await createAccount({
           name: name.trim(), type, currency: currencyCode, scope,
           ...(openingBalance !== undefined ? { openingBalance } : {}),
           ...(openingBalance !== undefined ? { openingBalanceDate: new Date().toISOString().slice(0, 10) } : {}),
+          ownerMemberId,
+          icon,
+          color,
         });
         message = "Cuenta creada y disponible para registrar movimientos.";
       }
@@ -98,9 +110,12 @@
       <header class="section-heading"><div><span class="eyebrow">{editing ? "Editar" : "Nueva"}</span><h2>{editing ? editing.name : "Configura la cuenta"}</h2></div><button class="icon-button" aria-label="Cerrar" onclick={() => (creating = false)}>×</button></header>
       <div class="form-grid">
         <label>Nombre<input bind:value={name} placeholder="Ej. Cuenta nómina" /></label>
+        <label>Emoji<input maxlength="16" bind:value={icon} placeholder="🏦" /></label>
+        <label>Color<input type="color" bind:value={color} /></label>
         {#if !editing}<label>Tipo<select bind:value={type}><option value="cash">Efectivo</option><option value="checking">Cuenta corriente</option><option value="savings">Ahorros</option><option value="digital_wallet">Billetera digital</option><option value="credit_card">Tarjeta de crédito</option><option value="investment">Inversión</option><option value="other_asset">Otro activo</option><option value="liability">Pasivo</option></select></label>{/if}
         <label>Moneda<select bind:value={currencyCode}><option>COP</option><option>USD</option><option>EUR</option></select></label>
         {#if !editing}<label>Alcance<select bind:value={scope}><option value="household">Compartida</option><option value="private">Solo yo</option></select></label><label>Saldo inicial opcional<input type="number" bind:value={openingBalance} /></label>{/if}
+        {#if scope === "household"}<label>Cuenta a nombre de<select bind:value={ownerMemberId}><option value={null}>Del hogar</option>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label>{/if}
       </div>
       <p class="privacy-note">El saldo proviene de Firefly. Un saldo inicial crea el asiento contable correspondiente; no es una reserva virtual.</p>
       {#if error}<p class="form-error" role="alert">{error}</p>{/if}
@@ -117,9 +132,9 @@
       <div class="account-list panel">
         {#each $financeData.accounts.filter((account) => account.scope === accountScope) as account}
           <div class="account-row">
-            <span class="account-icon">{account.type === "liability" ? "↘" : "◇"}</span>
-            <span><strong>{account.name}</strong><small>{account.type} · {account.currency} · {account.scope === "private" ? "Solo yo" : "Compartida"}</small></span>
-            <strong>{currency(account.currentBalance, account.currency)}</strong>
+            <span class="account-icon" style={`background:${account.color}20;color:${account.color}`}>{account.icon}</span>
+            <span><strong>{account.name}</strong><small>{account.ownerName} · {account.type} · {account.currency} · {account.scope === "private" ? "Solo yo" : "Compartida"}</small></span>
+            <span class="account-totals"><strong>{currency(account.availableBalance, account.currency)} disponible</strong><small>{currency(account.currentBalance, account.currency)} real · {currency(account.reservedAmount, account.currency)} en bolsillos</small></span>
             <div class="row-actions"><button onclick={() => openEdit(account)}>Editar</button><button class="danger-action" onclick={() => archive(account)}>Archivar</button></div>
           </div>
         {/each}

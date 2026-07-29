@@ -5,38 +5,26 @@
   import PocketCard from "$lib/PocketCard.svelte";
   let showQuickEntry = $state(false);
   let amount = $state<number | undefined>();
-  let pocketId = $state("daily");
   let accountId = $state("");
   let merchant = $state("");
   let category = $state("Mercado");
   let payerMemberId = $state("");
   let scope = $state<"household" | "private">("household");
+  let spendingNature = $state<"household" | "personal">("household");
   let saving = $state(false);
   let formError = $state("");
 
   const pockets = $derived($financeData.pockets);
   const transactions = $derived($financeData.transactions);
-  const reserved = $derived(
-    pockets
-      .filter((pocket) => pocket.visibility === scope && pocket.currency === $financeData.settings.baseCurrency && pocket.status !== "archived")
-      .reduce((sum, pocket) => sum + pocket.currentAmount, 0),
-  );
-  const accountBalance = $derived(
-    $financeData.accounts
-      .filter((account) => account.scope === scope && account.currency === $financeData.settings.baseCurrency)
-      .reduce((sum, account) => sum + account.currentBalance, 0),
+  const visibleAccounts = $derived(
+    $financeData.accounts.filter((account) => account.scope === scope),
   );
   const accountConnection = $derived(
     $financeData.accountConnections.find(
       (connection) => connection.scope === scope,
     ),
   );
-  const accountBalanceKnown = $derived(
-    !isServerMode() || accountConnection?.status === "available",
-  );
-  const available = $derived(
-    accountBalanceKnown ? accountBalance - reserved : null,
-  );
+  const accountBalanceKnown = $derived(!isServerMode() || accountConnection?.status === "available");
   const currentMonthStart = new Date(
     new Date().getFullYear(),
     new Date().getMonth(),
@@ -96,6 +84,14 @@
   );
   const latestInsight = $derived($financeData.insights.find((item) => item.scope === scope));
   const latestBundle = $derived(latestInsight?.payload.bundle);
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recentTransactions = $derived(
+    transactions.filter(
+      (transaction) =>
+        transaction.scope === scope &&
+        new Date(transaction.occurredAt).getTime() >= sevenDaysAgo,
+    ),
+  );
 
   async function saveTransaction() {
     formError = "";
@@ -105,24 +101,17 @@
     }
     saving = true;
     try {
-      const selectedPocketId = pockets.some((pocket) => pocket.id === pocketId)
-        ? pocketId
-        : pockets[0]?.id;
-      if (!selectedPocketId) throw new Error("Crea primero un bolsillo");
-      const selectedPocket = pockets.find((pocket) => pocket.id === selectedPocketId);
-      const compatibleAccounts = $financeData.accounts.filter(
-        (account) => account.scope === selectedPocket?.visibility,
-      );
-      const selectedAccountId = compatibleAccounts.some((account) => account.id === accountId)
+      const selectedAccountId = visibleAccounts.some((account) => account.id === accountId)
         ? accountId
-        : compatibleAccounts[0]?.id;
+        : visibleAccounts[0]?.id;
+      if (!selectedAccountId) throw new Error("Crea o conecta primero una cuenta");
       await createTransaction({
         amount,
-        pocketId: selectedPocketId,
         accountId: selectedAccountId,
         merchant: merchant.trim(),
         category,
         payerMemberId: payerMemberId || $financeData.settings.memberId,
+        spendingNature,
       });
       amount = undefined;
       merchant = "";
@@ -137,27 +126,38 @@
 
 <div class="page home-page">
   <header class="page-header">
-    <div><span class="eyebrow">{new Intl.DateTimeFormat("es-CO", { dateStyle: "full" }).format(new Date())}</span><h1>Buenos días, {$financeData.settings.memberName}</h1><p>{$financeData.settings.householdName} · {accountBalanceKnown ? "saldo real actualizado desde Firefly." : accountConnection?.configured ? "Firefly no está disponible en este momento." : "conecta Firefly para consultar el saldo real."}</p></div>
+    <div><span class="eyebrow">{new Intl.DateTimeFormat("es-CO", { dateStyle: "full" }).format(new Date())}</span><h1>Buenos días, {$financeData.settings.memberName}</h1><p>{$financeData.settings.householdName} · {accountBalanceKnown ? "saldos reales actualizados desde Firefly." : accountConnection?.configured ? "Firefly no está disponible en este momento." : "conecta Firefly para consultar los saldos reales."}</p></div>
     <a class="avatar-button" href="/household" aria-label="Abrir perfil">{$financeData.settings.memberAvatar ?? $financeData.settings.memberName.slice(0,1).toUpperCase()}</a>
   </header>
   <div class="filter-tabs"><button class:active={scope === "household"} onclick={() => (scope = "household")}>Compartido</button><button class:active={scope === "private"} onclick={() => (scope = "private")}>Solo yo</button></div>
 
-  <section class="hero-balance">
-    <div>
-      <span class="eyebrow">Disponible después de compromisos</span>
-      <strong>{available === null ? "—" : currency(available)}</strong>
-      <small>{accountBalanceKnown ? `Saldo real ${currency(accountBalance)} menos ${currency(reserved)} reservado virtualmente` : `Saldo real no disponible · ${currency(reserved)} reservado virtualmente en OKLE`}</small>
-    </div>
-    <div class="hero-progress">
-      {#if budgetUsed === null}
-        <div><span>Presupuesto de vida diaria</span><b>Sin configurar</b></div>
-        <p>Crea un bolsillo con límite periódico para calcular el ritmo de gasto.</p>
-      {:else}
-        <div><span>Presupuesto usado este mes</span><b>{budgetUsed}%</b></div>
-        <div class="progress light"><span style={`width: ${budgetUsed}%`}></span></div>
-        <p>Gasto del mes: <strong>{currency(monthlySpent)}</strong>. Disponible diario estimado en «{dailyPocket?.name}»: <strong>{currency((dailyPocket?.currentAmount ?? 0) / daysRemainingThisMonth)}</strong>.</p>
-      {/if}
-    </div>
+  <section class="section-block account-balance-section">
+    <header class="section-heading"><div><span class="eyebrow">Dinero real por cuenta</span><h2>Lo que puedes usar hoy</h2><p>Disponible = saldo bancario menos el dinero que reservaste desde esa cuenta.</p></div><a href="/accounts">Administrar</a></header>
+    {#if accountBalanceKnown && visibleAccounts.length}
+      <div class="account-balance-grid">
+        {#each visibleAccounts as account}
+          <article class="account-balance-card" style={`--account-color:${account.color}`}>
+            <header><span class="account-emoji">{account.icon}</span><span>{account.ownerName}</span></header>
+            <h3>{account.name}</h3>
+            <strong>{currency(account.availableBalance, account.currency)}</strong>
+            <dl><div><dt>Saldo bancario</dt><dd>{currency(account.currentBalance, account.currency)}</dd></div><div><dt>En bolsillos</dt><dd>{currency(account.reservedAmount, account.currency)}</dd></div></dl>
+          </article>
+        {/each}
+      </div>
+    {:else}
+      <div class="empty-state panel"><strong>{accountBalanceKnown ? "Aún no hay cuentas" : "No pudimos consultar Firefly"}</strong><p>{accountBalanceKnown ? "Crea o conecta una cuenta para conocer tu dinero real disponible." : "Tus reservas siguen guardadas; vuelve a intentarlo cuando el libro esté disponible."}</p></div>
+    {/if}
+  </section>
+
+  <section class="hero-progress standalone panel">
+    {#if budgetUsed === null}
+      <div><span>Presupuesto de vida diaria</span><b>Sin configurar</b></div>
+      <p>Crea un bolsillo con límite periódico para calcular el ritmo de gasto.</p>
+    {:else}
+      <div><span>Presupuesto usado este mes</span><b>{budgetUsed}%</b></div>
+      <div class="progress"><span style={`width: ${budgetUsed}%`}></span></div>
+      <p>Gasto del mes: <strong>{currency(monthlySpent)}</strong>. Disponible diario estimado en «{dailyPocket?.name}»: <strong>{currency((dailyPocket?.currentAmount ?? 0) / daysRemainingThisMonth)}</strong>.</p>
+    {/if}
   </section>
 
   {#if latestBundle}
@@ -177,13 +177,14 @@
     <article class="panel">
       <header class="section-heading"><div><span class="eyebrow">Últimos registros</span><h2>Movimientos</h2></div><a href="/transactions">Ver todos</a></header>
       <div class="transaction-list">
-        {#each transactions.slice(0, 3) as transaction}
+        {#each recentTransactions.slice(0, 7) as transaction}
           <div class="transaction-row">
-            <span class="transaction-icon">{transaction.category.slice(0, 1)}</span>
+            <span class="transaction-icon">{transaction.kind === "transfer" ? "↔" : transaction.category.slice(0, 1)}</span>
             <span><strong>{transaction.merchant}</strong><small>{transaction.category} · {transaction.payer}</small></span>
-            <span class="transaction-amount"><strong>{transaction.kind === "expense" ? "-" : "+"}{currency(transaction.amount, transaction.currency)}</strong><small>{transaction.date}</small></span>
+            <span class="transaction-amount"><strong>{transaction.kind === "expense" ? "-" : transaction.kind === "income" ? "+" : "↔ "}{currency(transaction.amount, transaction.currency)}</strong><small>{transaction.date}</small></span>
           </div>
         {/each}
+        {#if recentTransactions.length === 0}<p class="empty-inline">No hay movimientos en los últimos siete días.</p>{/if}
       </div>
     </article>
     <article class="panel allocation-card">
@@ -201,10 +202,10 @@
     <div class="quick-entry" role="dialog" aria-modal="true" aria-labelledby="quick-title">
       <header><div><span class="eyebrow">Movimiento rápido</span><h2 id="quick-title">Registrar gasto</h2></div><button class="icon-button" onclick={() => (showQuickEntry = false)} aria-label="Cerrar">×</button></header>
       <div class="amount-input"><span>$</span><input aria-label="Cantidad" inputmode="decimal" placeholder="0" type="number" min="1" bind:value={amount} /></div>
-      <label>¿De qué bolsillo?<select bind:value={pocketId}>{#each pockets as pocket}<option value={pocket.id}>{pocket.name} · {pocket.visibility === "private" ? "Solo yo" : "Compartido"}</option>{/each}</select></label>
-      <label>Cuenta o tarjeta<select bind:value={accountId}>{#each $financeData.accounts.filter((account) => account.scope === (pockets.find((pocket) => pocket.id === pocketId)?.visibility ?? pockets[0]?.visibility)) as account}<option value={account.id}>{account.name} · {account.currency}</option>{/each}</select>{#if !$financeData.accounts.some((account) => account.scope === (pockets.find((pocket) => pocket.id === pocketId)?.visibility ?? pockets[0]?.visibility))}<small>No hay cuentas en este alcance. <a href="/accounts">Crear cuenta</a></small>{/if}</label>
+      <label>Cuenta o tarjeta<select bind:value={accountId}><option value="">Seleccionar…</option>{#each visibleAccounts as account}<option value={account.id}>{account.icon} {account.name} · disponible {currency(account.availableBalance, account.currency)}</option>{/each}</select>{#if visibleAccounts.length === 0}<small>No hay cuentas en este alcance. <a href="/accounts">Crear cuenta</a></small>{/if}</label>
       <label>Comercio o descripción<input placeholder="Ej. mercado semanal" bind:value={merchant} /></label>
-      <div class="form-row"><label>Categoría<select bind:value={category}>{#each $financeData.categories as item}<option value={item.name}>{item.name}</option>{/each}</select></label><label>Pagó<select bind:value={payerMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label></div>
+      <div class="form-row"><label>Categoría<select bind:value={category}>{#each $financeData.categories as item}<option value={item.name}>{item.icon} {item.name}</option>{/each}</select></label><label>Pagó<select bind:value={payerMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label></div>
+      <label>Este gasto es<select bind:value={spendingNature}><option value="household">Familiar</option><option value="personal">Personal</option></select></label>
       {#if formError}<p class="form-error" role="alert">{formError}</p>{/if}
       <button class="primary-button" disabled={saving} onclick={saveTransaction}>{saving ? "Guardando…" : "Guardar gasto"}</button>
     </div>

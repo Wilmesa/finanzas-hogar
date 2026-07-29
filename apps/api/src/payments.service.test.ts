@@ -35,6 +35,9 @@ describe("PaymentsService", () => {
 
   it("crea por defecto un pago compartido y su primer vencimiento", async () => {
     const prisma = {
+      member: {
+        findFirst: vi.fn(async () => ({ id: actor.memberId })),
+      },
       paymentPlan: {
         create: vi.fn(async ({ data }) => ({ id: "payment-1", ...data })),
       },
@@ -55,6 +58,7 @@ describe("PaymentsService", () => {
         data: expect.objectContaining({
           householdId: actor.householdId,
           ownerMemberId: actor.memberId,
+          responsibleMemberId: actor.memberId,
           visibility: "household",
           currency: "COP",
           occurrences: expect.any(Object),
