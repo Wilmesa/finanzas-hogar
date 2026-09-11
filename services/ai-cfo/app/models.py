@@ -14,8 +14,8 @@ class Metrics(BaseModel):
     model_config = ConfigDict(extra="forbid")
     income: str
     spent: str
-    savingsRate: float
-    safeDailySpend: str
+    savingsRate: float | None
+    safeDailySpend: str | None
 
 
 class Evidence(BaseModel):

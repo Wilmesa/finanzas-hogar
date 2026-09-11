@@ -6,6 +6,11 @@ node_modules
 **/__pycache__
 .venv
 .env
+**/.env*
+!**/.env.example
+secrets
+**/secrets
+**/build
 runtime
 backups
 coverage

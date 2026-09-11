@@ -257,6 +257,7 @@ export interface FinanceState {
     memberColor: string;
     householdName: string;
     baseCurrency: string;
+    timezone?: string;
     dailyReminder: string;
     uiPreferences: {
       primaryColor: string;

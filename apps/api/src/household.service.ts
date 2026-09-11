@@ -284,7 +284,7 @@ export class HouseholdService {
       completedAt: household.onboardingCompletedAt,
       steps: {
         household: household.members.length >= 1,
-        sharedFirefly: this.firefly.hasToken("household", actor.memberId),
+        sharedFirefly: accounts[0].status === "fulfilled",
         privateFirefly: this.firefly.hasToken("private", actor.memberId),
         sharedAccount: householdAccounts > 0,
         privateAccount: privateAccounts > 0,
@@ -297,7 +297,13 @@ export class HouseholdService {
     };
   }
 
-  completeOnboarding(actor: Actor) {
+  async completeOnboarding(actor: Actor) {
+    const status = await this.onboarding(actor);
+    if (!status.steps.sharedFirefly || !status.steps.sharedAccount) {
+      throw new BadRequestException(
+        "Conecta el libro compartido y crea tu primera cuenta antes de terminar. La IA y las cuentas privadas son opcionales",
+      );
+    }
     return this.prisma.household.update({
       where: { id: actor.householdId },
       data: { onboardingCompletedAt: new Date() },

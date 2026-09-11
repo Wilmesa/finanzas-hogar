@@ -65,7 +65,7 @@
       {#if installed}
         Está instalada y se abre como una app independiente.
       {:else}
-        Instálala para abrirla desde la pantalla de inicio y usar las pantallas ya visitadas sin conexión.
+        Instálala para abrirla desde la pantalla de inicio. Sin internet puedes dejar un gasto pendiente si la sesión y la pantalla ya estaban abiertas; volver a iniciar sesión requiere conexión.
       {/if}
     </p>
   </div>

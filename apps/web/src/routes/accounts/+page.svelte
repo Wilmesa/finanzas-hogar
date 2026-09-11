@@ -30,7 +30,7 @@
     currencyCode = "COP";
     scope = selectedScope;
     openingBalance = undefined;
-    ownerMemberId = null;
+    ownerMemberId = $financeData.settings.memberId;
     icon = "🏦";
     color = "#123C69";
     isPrimary = selectedScope === "household";
@@ -117,7 +117,7 @@
         <label>Emoji<input maxlength="16" bind:value={icon} placeholder="🏦" /></label>
         <label>Color<input type="color" bind:value={color} /></label>
         {#if !editing}<label>Tipo<select bind:value={type}><option value="cash">Efectivo</option><option value="checking">Cuenta corriente</option><option value="savings">Ahorros</option><option value="digital_wallet">Billetera digital</option><option value="credit_card">Tarjeta de crédito</option><option value="investment">Inversión</option><option value="other_asset">Otro activo</option><option value="liability">Pasivo</option></select></label>{/if}
-        <label>Moneda<select bind:value={currencyCode}><option>COP</option><option>USD</option><option>EUR</option></select></label>
+        <label>Moneda<select bind:value={currencyCode} disabled={!!editing}><option>COP</option><option>USD</option><option>EUR</option></select></label>
         {#if !editing}<label>Alcance<select bind:value={scope}><option value="household">Compartida</option><option value="private">Solo yo</option></select></label><label>Saldo inicial opcional<input type="number" bind:value={openingBalance} /></label>{/if}
         {#if scope === "household"}<label>Cuenta a nombre de<select bind:value={ownerMemberId}><option value={null}>Del hogar</option>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label>{/if}
       </div>

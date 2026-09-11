@@ -2,6 +2,21 @@
 
 ## Bienvenida y concepto básico
 
+### Cambios de estabilidad
+
+- En **Movimientos → Comprobar sincronización**, OKLE busca movimientos que quedaron
+  sin confirmar. Espera dos minutos después del envío. Si sigue sin poder confirmar,
+  no registres el mismo importe otra vez: revisa el libro Firefly con el administrador.
+- Al registrar un gasto, **Visibilidad del detalle → Solo yo** oculta descripción y
+  categoría. El hogar sigue viendo su importe como **Asignación personal**. Cambia
+  **Ver movimientos** entre Compartidos y Solo yo para consultar cada contexto sin
+  sumar dos veces el mismo gasto. “Personal” solo clasifica; no oculta.
+- Los gráficos cargan todas las páginas de movimientos, separan monedas y excluyen
+  pendientes/anulaciones. Las fechas siguen la zona horaria del hogar.
+- Un gasto offline pertenece a quien lo guardó. Tras reconectar o abrir la PWA,
+  entra con ese mismo usuario para sincronizarlo. No borres datos del navegador
+  mientras tengas borradores pendientes. El inicio de sesión requiere internet.
+
 OKLE ayuda a una pareja a registrar lo que realmente ocurrió, reservar dinero
 por propósito y recordar lo que acordó para el futuro.
 

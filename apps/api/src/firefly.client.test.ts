@@ -25,6 +25,33 @@ afterEach(() => {
 });
 
 describe("Firefly accounts", () => {
+  it("pagina las cuentas y no vuelve a ofrecer las archivadas", async () => {
+    process.env.FIREFLY_BASE_URL = "http://firefly.test";
+    process.env.FIREFLY_HOUSEHOLD_TOKEN = "test-token";
+    const fetchMock = vi.fn(
+      async (url: string) =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: url.endsWith("page=1") ? "1" : "2",
+                attributes: {
+                  name: "Cuenta",
+                  type: "asset",
+                  active: !url.endsWith("page=1"),
+                },
+              },
+            ],
+            meta: { pagination: { total_pages: 2 } },
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    expect(
+      await new FireflyClient().listAssetAccounts("household", actor.memberId),
+    ).toEqual([expect.objectContaining({ id: "2" })]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   it("crea una cuenta en el alcance seleccionado sin exponer el token", async () => {
     process.env.FIREFLY_BASE_URL = "http://firefly.test";
     process.env.FIREFLY_HOUSEHOLD_TOKEN = "secret-token";

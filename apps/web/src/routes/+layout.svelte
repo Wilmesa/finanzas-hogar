@@ -13,6 +13,25 @@
   let loading = $state(true);
   let authenticated = $state(false);
   let error = $state("");
+  let syncMessage = $state("");
+
+  function requestSync() {
+    if (authenticated && isServerMode() && navigator.onLine && "serviceWorker" in navigator)
+      void navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage({ type: "OKLE_SYNC_REQUEST" }));
+  }
+  onMount(() => {
+    const syncResult = (event: MessageEvent) => {
+      if (!authenticated) return;
+      if (event.data?.type === "OKLE_SYNC_COMPLETE") void hydrateFinanceData().catch(() => { syncMessage = "No se pudo actualizar. Reintenta al recuperar conexión."; });
+      if (event.data?.type === "OKLE_SYNC_REQUIRES_REVIEW") syncMessage = "Hay un gasto pendiente que requiere revisión. No lo registres otra vez; comprueba Movimientos.";
+    };
+    window.addEventListener("online", requestSync);
+    navigator.serviceWorker?.addEventListener("message", syncResult);
+    return () => {
+      window.removeEventListener("online", requestSync);
+      navigator.serviceWorker?.removeEventListener("message", syncResult);
+    };
+  });
 
   onMount(async () => {
     if (page.url.pathname === "/auth/callback") {
@@ -23,6 +42,7 @@
     try {
       authenticated = await isAuthenticated();
       if (authenticated) await hydrateFinanceData();
+      requestSync();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "No fue posible iniciar la aplicación";
     } finally {
@@ -33,6 +53,7 @@
   async function localLoginSucceeded() {
     await hydrateFinanceData();
     authenticated = true;
+    requestSync();
   }
 </script>
 
@@ -58,6 +79,6 @@
     <Nav />
     <NotificationBell />
     <ThemeToggle />
-    <main>{@render children()}</main>
+    <main>{#if syncMessage}<p role="status">{syncMessage}</p>{/if}{@render children()}</main>
   </div>
 {/if}

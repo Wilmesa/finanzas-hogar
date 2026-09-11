@@ -17,7 +17,7 @@ test("la experiencia servidor no contiene identidades ni insight ficticios conoc
   const transactions = read("apps/web/src/routes/transactions/+page.svelte");
   const nav = read("apps/web/src/lib/Nav.svelte");
   for (const source of [home, transactions, nav]) {
-    assert.doesNotMatch(source, /Ana|Leo|comidas fuera subió 24/);
+    assert.doesNotMatch(source, /\b(?:Ana|Leo)\b|comidas fuera subió 24/);
   }
 });
 

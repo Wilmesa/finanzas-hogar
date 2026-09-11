@@ -38,6 +38,7 @@ import { NewsService } from "./news.service.js";
 import { PlanningService } from "./planning.service.js";
 import { PrismaService } from "./prisma.service.js";
 import { TransactionsService } from "./transactions.service.js";
+import { TransactionRecoveryService } from "./transaction-recovery.service.js";
 import { RemindersService } from "./reminders.service.js";
 import { AuthController } from "./auth.controller.js";
 import { AuthenticationService } from "./auth.js";
@@ -97,6 +98,7 @@ import { CalendarService } from "./calendar.service.js";
     CalendarService,
     PocketsService,
     TransactionsService,
+    TransactionRecoveryService,
     FireflyClient,
     AiCfoClient,
     NewsService,

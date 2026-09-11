@@ -20,7 +20,10 @@ function openDatabase(): Promise<IDBDatabase> {
 export async function queueOfflineTransaction(
   body: Record<string, unknown>,
   idempotencyKey: string,
+  memberId: string,
 ) {
+  if (!memberId)
+    throw new Error("Inicia sesión antes de guardar un gasto pendiente");
   if (authMode() !== "local") {
     throw new Error(
       "La captura offline requiere autenticación local. Con OIDC conserva el borrador y envíalo al recuperar conexión.",
@@ -31,6 +34,7 @@ export async function queueOfflineTransaction(
     const transaction = database.transaction(STORE, "readwrite");
     transaction.objectStore(STORE).put({
       id: idempotencyKey,
+      memberId,
       path: "/api/v1/transactions",
       body,
       csrfToken: getCsrfToken(),

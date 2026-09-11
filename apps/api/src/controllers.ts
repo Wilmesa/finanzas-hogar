@@ -30,6 +30,8 @@ import { PocketsService } from "./pockets.service.js";
 import { PrismaService } from "./prisma.service.js";
 import { NewsService } from "./news.service.js";
 import { FireflyClient } from "./firefly.client.js";
+import { TransactionRecoveryService } from "./transaction-recovery.service.js";
+import { financialDate, financialMonthStart } from "./financial-date.js";
 import { PlanningService } from "./planning.service.js";
 import { RemindersService } from "./reminders.service.js";
 import { HouseholdService } from "./household.service.js";
@@ -661,11 +663,19 @@ export class AllocationController {
 
 @Controller("v1/transactions")
 export class TransactionsController {
-  constructor(private readonly transactions: TransactionsService) {}
+  constructor(
+    private readonly transactions: TransactionsService,
+    private readonly recovery: TransactionRecoveryService,
+  ) {}
+
+  @Post("reconcile")
+  reconcile(@CurrentActor() actor: Actor) {
+    return this.recovery.reconcile(actor);
+  }
 
   @Get()
-  list(@CurrentActor() actor: Actor) {
-    return this.transactions.list(actor);
+  list(@CurrentActor() actor: Actor, @Query("after") after?: string) {
+    return this.transactions.list(actor, after);
   }
 
   @Post()
@@ -867,18 +877,22 @@ export class AnalyticsController {
   @Get("household")
   async household(@CurrentActor() actor: Actor) {
     const now = new Date();
-    const start = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
-    );
-    const [transactions, household] = await Promise.all([
+    const region = await this.prisma.household.findUniqueOrThrow({
+      where: { id: actor.householdId },
+      select: { timezone: true },
+    });
+    const start = financialMonthStart(now, region.timezone);
+    const [rawTransactions, household, reversals] = await Promise.all([
       this.prisma.transactionAttribution.findMany({
         where: {
           householdId: actor.householdId,
           ledgerScope: "household",
           transactionType: "withdrawal",
-          occurredAt: { gte: start },
+          syncStatus: "synchronized",
+          occurredAt: { gte: start, lte: now },
         },
         select: {
+          id: true,
           amount: true,
           category: true,
           merchant: true,
@@ -890,20 +904,45 @@ export class AnalyticsController {
         where: { id: actor.householdId },
         select: { baseCurrency: true },
       }),
+      this.prisma.auditLog.findMany({
+        where: {
+          householdId: actor.householdId,
+          entityType: "TransactionAttribution",
+          action: "reversed",
+        },
+        select: { entityId: true, after: true },
+      }),
     ]);
-    const byCategory = new Map<string, number>();
+    const reversedIds = new Set(
+      reversals.flatMap((item) => {
+        const after = item.after as { reversalId?: string } | null;
+        return after?.reversalId
+          ? [item.entityId, after.reversalId]
+          : [item.entityId];
+      }),
+    );
+    const transactions = rawTransactions.filter(
+      (item) =>
+        item.currency === household.baseCurrency && !reversedIds.has(item.id),
+    );
+    const byCategory = new Map<string, Prisma.Decimal>();
     for (const transaction of transactions) {
       const category = transaction.category ?? "Sin categoría";
       byCategory.set(
         category,
-        (byCategory.get(category) ?? 0) + Number(transaction.amount),
+        (byCategory.get(category) ?? new Prisma.Decimal(0)).plus(
+          transaction.amount,
+        ),
       );
     }
     return {
       periodStart: start.toISOString(),
       currency: household.baseCurrency,
       spent: transactions
-        .reduce((sum, transaction) => sum + Number(transaction.amount), 0)
+        .reduce(
+          (sum, transaction) => sum.plus(transaction.amount),
+          new Prisma.Decimal(0),
+        )
         .toString(),
       byCategory: [...byCategory.entries()].map(([category, amount]) => ({
         category,
@@ -974,14 +1013,17 @@ export class InsightsController {
   ) {
     const scope = body.scope ?? "household";
     const now = new Date();
-    const start = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
-    );
-    const [transactions, household, pockets] = await Promise.all([
+    const region = await this.prisma.household.findUniqueOrThrow({
+      where: { id: actor.householdId },
+      select: { timezone: true },
+    });
+    const start = financialMonthStart(now, region.timezone);
+    const [rawTransactions, household, pockets, reversals] = await Promise.all([
       this.prisma.transactionAttribution.findMany({
         where: {
           householdId: actor.householdId,
           ledgerScope: scope,
+          syncStatus: "synchronized",
           ...(scope === "private" ? { payerMemberId: actor.memberId } : {}),
           occurredAt: { gte: start, lte: now },
         },
@@ -990,6 +1032,7 @@ export class InsightsController {
           amount: true,
           category: true,
           transactionType: true,
+          currency: true,
         },
       }),
       this.prisma.household.findUniqueOrThrow({
@@ -1012,14 +1055,37 @@ export class InsightsController {
           policy: true,
         },
       }),
+      this.prisma.auditLog.findMany({
+        where: {
+          householdId: actor.householdId,
+          entityType: "TransactionAttribution",
+          action: "reversed",
+        },
+        select: { entityId: true, after: true },
+      }),
     ]);
+    const reversedIds = new Set(
+      reversals.flatMap((item) => {
+        const after = item.after as { reversalId?: string } | null;
+        return after?.reversalId
+          ? [item.entityId, after.reversalId]
+          : [item.entityId];
+      }),
+    );
+    const transactions = rawTransactions.filter(
+      (item) =>
+        item.currency === household.baseCurrency && !reversedIds.has(item.id),
+    );
     const expenses = transactions.filter(
       (item) => item.transactionType === "withdrawal",
     );
     const receivedIncome = transactions
       .filter((item) => item.transactionType === "deposit")
-      .reduce((sum, item) => sum + Number(item.amount), 0);
-    const spent = expenses.reduce((sum, item) => sum + Number(item.amount), 0);
+      .reduce((sum, item) => sum.plus(item.amount), new Prisma.Decimal(0));
+    const spent = expenses.reduce(
+      (sum, item) => sum.plus(item.amount),
+      new Prisma.Decimal(0),
+    );
     const evidence = transactions.slice(0, 50).map((item) => ({
       id: `transaction:${item.id}`,
       kind: "transaction",
@@ -1056,12 +1122,14 @@ export class InsightsController {
         value: item.expectedAmount.toString(),
       })),
     );
-    const categoryTotals = new Map<string, number>();
+    const categoryTotals = new Map<string, Prisma.Decimal>();
     for (const item of expenses) {
       const category = item.category ?? "Sin categoría";
       categoryTotals.set(
         category,
-        (categoryTotals.get(category) ?? 0) + Number(item.amount),
+        (categoryTotals.get(category) ?? new Prisma.Decimal(0)).plus(
+          item.amount,
+        ),
       );
     }
     const news = await this.prisma.newsArticle.findMany({
@@ -1071,8 +1139,8 @@ export class InsightsController {
     const snapshot = {
       scope,
       period: {
-        start: start.toISOString().slice(0, 10),
-        end: now.toISOString().slice(0, 10),
+        start: financialDate(start, region.timezone),
+        end: financialDate(now, region.timezone),
         daysRemaining:
           new Date(
             Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
@@ -1082,8 +1150,8 @@ export class InsightsController {
       metrics: {
         income: receivedIncome.toString(),
         spent: spent.toString(),
-        savingsRate: 0,
-        safeDailySpend: "0",
+        savingsRate: null,
+        safeDailySpend: null,
       },
       stateBalances: {
         REAL: null,
@@ -1245,59 +1313,85 @@ export class AiCfoController {
         "El mensaje debe tener entre 1 y 4.000 caracteres",
       );
     const scope = body.scope === "private" ? "private" : "household";
-    const [household, transactions, pockets, history] = await Promise.all([
-      this.prisma.household.findUniqueOrThrow({
-        where: { id: actor.householdId },
-        select: { baseCurrency: true },
+    const [household, transactions, pockets, history, reversals] =
+      await Promise.all([
+        this.prisma.household.findUniqueOrThrow({
+          where: { id: actor.householdId },
+          select: { baseCurrency: true },
+        }),
+        this.prisma.transactionAttribution.findMany({
+          where: {
+            householdId: actor.householdId,
+            ledgerScope: scope,
+            syncStatus: "synchronized",
+            transactionType: "withdrawal",
+            ...(scope === "private" ? { payerMemberId: actor.memberId } : {}),
+          },
+          select: {
+            id: true,
+            amount: true,
+            currency: true,
+            category: true,
+            occurredAt: true,
+            payerMemberId: true,
+          },
+          orderBy: { occurredAt: "desc" },
+          take: 50,
+        }),
+        this.prisma.pocket.findMany({
+          where: {
+            householdId: actor.householdId,
+            visibility: scope,
+            ...(scope === "private" ? { ownerMemberId: actor.memberId } : {}),
+            status: { not: "archived" },
+          },
+          select: {
+            name: true,
+            purpose: true,
+            currency: true,
+            currentAmount: true,
+            policy: true,
+          },
+          take: 30,
+        }),
+        this.prisma.chatMessage.findMany({
+          where: {
+            householdId: actor.householdId,
+            scope,
+            ...(scope === "private" ? { memberId: actor.memberId } : {}),
+          },
+          select: { role: true, content: true },
+          orderBy: { createdAt: "desc" },
+          take: 12,
+        }),
+        this.prisma.auditLog.findMany({
+          where: {
+            householdId: actor.householdId,
+            entityType: "TransactionAttribution",
+            action: "reversed",
+          },
+          select: { entityId: true, after: true },
+        }),
+      ]);
+    const excludedIds = new Set(
+      reversals.flatMap((item) => {
+        const after = item.after as { reversalId?: string } | null;
+        return after?.reversalId
+          ? [item.entityId, after.reversalId]
+          : [item.entityId];
       }),
-      this.prisma.transactionAttribution.findMany({
-        where: {
-          householdId: actor.householdId,
-          ledgerScope: scope,
-          ...(scope === "private" ? { payerMemberId: actor.memberId } : {}),
-        },
-        select: {
-          amount: true,
-          category: true,
-          occurredAt: true,
-          payerMemberId: true,
-        },
-        orderBy: { occurredAt: "desc" },
-        take: 50,
-      }),
-      this.prisma.pocket.findMany({
-        where: {
-          householdId: actor.householdId,
-          visibility: scope,
-          ...(scope === "private" ? { ownerMemberId: actor.memberId } : {}),
-          status: { not: "archived" },
-        },
-        select: {
-          name: true,
-          purpose: true,
-          currency: true,
-          currentAmount: true,
-          policy: true,
-        },
-        take: 30,
-      }),
-      this.prisma.chatMessage.findMany({
-        where: {
-          householdId: actor.householdId,
-          scope,
-          ...(scope === "private" ? { memberId: actor.memberId } : {}),
-        },
-        select: { role: true, content: true },
-        orderBy: { createdAt: "desc" },
-        take: 12,
-      }),
-    ]);
-    const totals = new Map<string, number>();
+    );
+    const totals = new Map<string, Prisma.Decimal>();
     const memberAliases = new Map<string, string>();
-    const totalsByMember = new Map<string, number>();
+    const totalsByMember = new Map<string, Prisma.Decimal>();
     for (const item of transactions) {
+      if (item.currency !== household.baseCurrency || excludedIds.has(item.id))
+        continue;
       const category = item.category ?? "Sin categoría";
-      totals.set(category, (totals.get(category) ?? 0) + Number(item.amount));
+      totals.set(
+        category,
+        (totals.get(category) ?? new Prisma.Decimal(0)).plus(item.amount),
+      );
       if (!memberAliases.has(item.payerMemberId)) {
         memberAliases.set(
           item.payerMemberId,
@@ -1307,7 +1401,7 @@ export class AiCfoController {
       const alias = memberAliases.get(item.payerMemberId)!;
       totalsByMember.set(
         alias,
-        (totalsByMember.get(alias) ?? 0) + Number(item.amount),
+        (totalsByMember.get(alias) ?? new Prisma.Decimal(0)).plus(item.amount),
       );
     }
     const status = await this.ai.status();
@@ -1330,7 +1424,8 @@ export class AiCfoController {
       currency: household.baseCurrency,
       history: history.reverse(),
       context: {
-        period: "últimos 50 movimientos autorizados",
+        period:
+          "muestra de hasta 50 gastos confirmados autorizados; solo moneda base, sin anulaciones; no es el historial completo",
         spendingByCategory: [...totals.entries()].map(([category, amount]) => ({
           category,
           amount: amount.toString(),
@@ -1344,8 +1439,10 @@ export class AiCfoController {
           freeTextNotesRemoved: true,
           privatePartnerDataExcluded: scope === "household",
         },
-        pockets: pockets.map((pocket) => ({
-          ...pocket,
+        pockets: pockets.map((pocket, index) => ({
+          name: `Bolsillo ${index + 1}`,
+          purpose: pocket.purpose,
+          currency: pocket.currency,
           currentAmount: pocket.currentAmount.toString(),
         })),
       },

@@ -34,8 +34,7 @@ scripts/compose.sh stop api firefly
 if [ "${enable_bundled_n8n:-false}" = "true" ]; then scripts/compose.sh stop n8n; fi
 if [ "${auth_mode:-local}" = "keycloak" ]; then scripts/compose.sh stop keycloak; fi
 
-scripts/compose.sh exec -T postgres \
-  pg_dumpall --clean --if-exists -U finanzas | gzip > "$backup_dir/postgres.sql.gz"
+sh scripts/database-backup.sh "$backup_dir/databases"
 
 archive_volume() {
   volume_name=$1
@@ -76,7 +75,7 @@ scripts/compose.sh images > "$backup_dir/images.txt"
   echo "DEPLOY_TARGET=$deploy_target"
   echo "AUTH_MODE=${auth_mode:-local}"
   echo "ENABLE_BUNDLED_N8N=${enable_bundled_n8n:-false}"
-  echo "BACKUP_FORMAT=3"
+  echo "BACKUP_FORMAT=4"
 } > "$backup_dir/metadata.env"
 
 (cd "$backup_dir" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)

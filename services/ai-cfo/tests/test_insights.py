@@ -54,6 +54,15 @@ def test_deterministic_provider_reports_insufficient_data():
     assert bundle.opportunities == []
 
 
+def test_unknown_daily_budget_is_not_reported_as_zero():
+    source = snapshot()
+    source.metrics.safeDailySpend = None
+    source.metrics.savingsRate = None
+    bundle = asyncio.run(DeterministicProvider().generate(source))
+    assert bundle.alerts == []
+    assert "None" not in bundle.summary
+
+
 def test_gemini_provider_is_selected_without_exposing_key(monkeypatch):
     monkeypatch.setenv("AI_PROVIDER", "gemini")
     monkeypatch.setenv("GEMINI_API_KEY", "test-only-key")

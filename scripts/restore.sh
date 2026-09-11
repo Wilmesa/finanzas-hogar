@@ -24,8 +24,8 @@ backup_target=$(metadata_value DEPLOY_TARGET)
 backup_auth=$(metadata_value AUTH_MODE)
 backup_bundled_n8n=$(metadata_value ENABLE_BUNDLED_N8N)
 backup_commit=$(metadata_value GIT_COMMIT)
-if [ "$backup_format" != "2" ] && [ "$backup_format" != "3" ]; then
-  echo "Formato de backup incompatible" >&2
+if [ "$backup_format" != "4" ]; then
+  echo "Esta restauración segura requiere un backup formato 4. Conserva el backup antiguo; restaura formatos 2/3 en un clúster aislado con un administrador y genera después un formato 4. No se modificó el destino." >&2
   exit 1
 fi
 
@@ -50,7 +50,7 @@ scripts/compose.sh stop gateway api web ai-cfo firefly redis || true
 if [ "$ENABLE_BUNDLED_N8N" = "true" ]; then scripts/compose.sh stop n8n || true; fi
 if [ "$AUTH_MODE" = "keycloak" ]; then scripts/compose.sh stop keycloak || true; fi
 scripts/compose.sh up -d --wait postgres
-gzip -dc "$backup_dir/postgres.sql.gz" | scripts/compose.sh exec -T postgres psql -v ON_ERROR_STOP=1 -U finanzas -d postgres
+sh scripts/database-restore.sh "$backup_dir/databases"
 
 restore_volume() {
   archive=$1
@@ -73,7 +73,7 @@ restore_volume caddy-config.tar.gz "${current_project}_caddy_config"
 if [ "${RESTORE_ENV:-}" = "YES" ]; then
   cp "$backup_dir/env.secrets" .env
   chmod 600 .env
-  if [ "$backup_format" = "3" ]; then
+  if [ "$backup_format" = "4" ]; then
     keyring_path=$(sed -n 's/^PRIVATE_METADATA_KEYRING_HOST_FILE=//p' .env | tail -n 1)
     keyring_path=${keyring_path:-secrets/private-metadata-keyring.json}
     mkdir -p "$(dirname "$keyring_path")"

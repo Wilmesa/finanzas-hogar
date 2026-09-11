@@ -522,6 +522,25 @@ function serverFundingPlanToView(
   };
 }
 
+async function loadTransactionHistory(): Promise<Record<string, unknown>[]> {
+  const records: Record<string, unknown>[] = [];
+  const cursors = new Set<string>();
+  let after: string | undefined;
+  for (;;) {
+    const page = await apiRequest<Record<string, unknown>[]>(
+      `/v1/transactions${after ? `?after=${encodeURIComponent(after)}` : ""}`,
+    );
+    records.push(...page);
+    if (page.length < 200) return records;
+    after = String(page.at(-1)?.id ?? "");
+    if (!after || cursors.has(after))
+      throw new Error(
+        "No se pudo completar el historial. Vuelve a actualizar.",
+      );
+    cursors.add(after);
+  }
+}
+
 export async function hydrateFinanceData(): Promise<void> {
   if (!browser || !isServerMode()) return;
   const [
@@ -535,15 +554,18 @@ export async function hydrateFinanceData(): Promise<void> {
     categories,
   ] = await Promise.all([
     apiRequest<Record<string, unknown>[]>("/v1/pockets"),
-    apiRequest<Record<string, unknown>[]>("/v1/transactions"),
+    loadTransactionHistory(),
     apiRequest<{
       accounts: Record<string, unknown>[];
       connections: AccountConnectionView[];
     }>("/v1/accounts"),
     apiRequest<Record<string, unknown>>("/v1/planning"),
     apiRequest<Record<string, unknown>>("/v1/household"),
-    apiRequest<InsightView[]>("/v1/insights"),
-    apiRequest<AiStatusView>("/v1/ai-cfo/status"),
+    apiRequest<InsightView[]>("/v1/insights").catch(() => []),
+    apiRequest<AiStatusView>("/v1/ai-cfo/status").catch(() => ({
+      ...serverInitial.aiStatus,
+      status: "unavailable",
+    })),
     apiRequest<CategoryView[]>("/v1/categories"),
   ]);
   const planningSources = (planning.sources ?? []) as Record<string, unknown>[];
@@ -606,6 +628,7 @@ export async function hydrateFinanceData(): Promise<void> {
           ?.color?.toString() ?? "#059669",
       householdName: String(household.name),
       baseCurrency: String(household.baseCurrency),
+      timezone: String(household.timezone ?? "America/Bogota"),
       uiPreferences: {
         ...defaultUiPreferences,
         ...((household.uiPreferences ??
@@ -664,7 +687,7 @@ export async function hydrateFinanceData(): Promise<void> {
         ? { syncStatus: "synchronized" as const }
         : item.syncStatus === "failed"
           ? { syncStatus: "failed" as const }
-          : {}),
+          : { syncStatus: "queued" as const }),
       reviewStatus:
         item.reviewStatus === "PENDING" ||
         item.reviewStatus === "FLAGGED_FOR_PARTNER"
@@ -993,6 +1016,7 @@ export async function createTransaction(input: {
   destinationAccountId?: string;
   kind?: TransactionView["kind"];
   spendingNature?: "household" | "personal";
+  privacy?: "household" | "private";
 }): Promise<void> {
   const state = get(financeData);
   const kind = input.kind ?? "expense";
@@ -1041,6 +1065,7 @@ export async function createTransaction(input: {
       fundingSourceScope: account.scope,
       payerMemberId: input.payerMemberId,
       spendingNature: input.spendingNature ?? "household",
+      privacy: input.privacy ?? "household",
       sourceId:
         kind === "expense" || kind === "transfer" ? account.id : undefined,
       destinationId:
@@ -1058,7 +1083,11 @@ export async function createTransaction(input: {
       });
     } catch (cause) {
       if (navigator.onLine) throw cause;
-      await queueOfflineTransaction(body, idempotencyKey);
+      await queueOfflineTransaction(
+        body,
+        idempotencyKey,
+        state.settings.memberId,
+      );
       const pending: TransactionView = {
         id: `offline:${idempotencyKey}`,
         merchant: input.merchant,
@@ -1070,7 +1099,7 @@ export async function createTransaction(input: {
             ?.displayName ?? state.settings.memberName,
         amount: input.amount,
         currency: account.currency,
-        scope: account.scope,
+        scope: input.privacy === "private" ? "private" : account.scope,
         kind,
         date: "Pendiente",
         occurredAt: String(body.occurredAt),
@@ -1107,7 +1136,7 @@ export async function createTransaction(input: {
         ?.displayName ?? state.settings.memberName,
     amount: input.amount,
     currency: account.currency,
-    scope: account.scope,
+    scope: input.privacy === "private" ? "private" : account.scope,
     kind,
     date: "Ahora",
     occurredAt: new Date().toISOString(),

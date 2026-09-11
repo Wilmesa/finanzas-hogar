@@ -46,7 +46,11 @@ function prismaMock() {
         _sum: { remainingAmount: new Prisma.Decimal(0) },
       })),
     },
-    pocketEvent: { create: vi.fn(), count: vi.fn(async () => 0) },
+    pocketEvent: {
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      count: vi.fn(async () => 0),
+    },
     transactionAttribution: { count: vi.fn(async () => 0) },
     planFundingAllocation: { count: vi.fn(async () => 0) },
     paymentOccurrence: { count: vi.fn(async () => 0) },
@@ -144,6 +148,7 @@ describe("PocketsService", () => {
       visibility: "household",
       currency: "COP",
       currentAmount: new Prisma.Decimal(0),
+      status: "active",
     });
     const accounts = {
       availableForAllocation: vi.fn(async () => ({
@@ -152,6 +157,7 @@ describe("PocketsService", () => {
         availableAmount: new Prisma.Decimal(1500),
       })),
       assertOwnedAccount: vi.fn(),
+      assertReservationCapacity: vi.fn(),
     };
     const service = new PocketsService(prisma as never, accounts as never);
 
@@ -196,6 +202,7 @@ describe("PocketsService", () => {
       visibility: "household",
       currency: "COP",
       currentAmount: new Prisma.Decimal(0),
+      status: "active",
     });
     const accounts = {
       availableForAllocation: vi.fn(async () => ({
@@ -333,6 +340,7 @@ describe("PocketsService", () => {
         availableAmount: new Prisma.Decimal(1000),
       })),
       assertOwnedAccount: vi.fn(),
+      assertReservationCapacity: vi.fn(),
     };
     const service = new PocketsService(prisma as never, accounts as never);
 
