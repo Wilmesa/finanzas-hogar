@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import { build, files, version } from "$service-worker";
+import { canReplayOffline } from "./lib/offline-policy";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -174,6 +175,7 @@ async function queuedMutations() {
       path: string;
       body: Record<string, unknown>;
       csrfToken?: string;
+      memberId?: string;
     }>
   >((resolve, reject) => {
     const request = database
@@ -196,7 +198,15 @@ async function removeQueuedMutation(id: string) {
 }
 
 async function synchronizeMutations() {
+  const sessionResponse = await fetch("/api/v1/auth/me", {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (!sessionResponse.ok) return;
+  const session: { householdMemberId?: string; csrfToken?: string } =
+    await sessionResponse.json();
   for (const item of await queuedMutations()) {
+    if (!canReplayOffline(item, session)) continue;
     const response = await fetch(item.path, {
       method: "POST",
       credentials: "same-origin",
@@ -205,7 +215,7 @@ async function synchronizeMutations() {
         "Content-Type": "application/json",
         "Idempotency-Key": item.id,
         "X-OKLE-Offline-Sync": "true",
-        ...(item.csrfToken ? { "X-CSRF-Token": item.csrfToken } : {}),
+        "X-CSRF-Token": session.csrfToken!,
       },
       body: JSON.stringify(item.body),
     });
@@ -244,5 +254,13 @@ self.addEventListener("sync", (event) => {
   const syncEvent = event as ExtendableEvent & { tag: string };
   if (syncEvent.tag === OFFLINE_SYNC_TAG) {
     syncEvent.waitUntil(synchronizeMutations());
+  }
+});
+
+// iOS does not implement Background Sync. Replay while the app is open or
+// reconnects, using the same idempotency keys as the background path.
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "OKLE_SYNC_REQUEST") {
+    event.waitUntil(synchronizeMutations());
   }
 });

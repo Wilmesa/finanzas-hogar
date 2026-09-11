@@ -2,9 +2,11 @@ FROM node:24-alpine AS build
 RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
+COPY packages/domain/package.json ./packages/domain/package.json
+COPY apps/api/package.json ./apps/api/package.json
+RUN pnpm install --frozen-lockfile
 COPY packages/domain ./packages/domain
 COPY apps/api ./apps/api
-RUN pnpm install --frozen-lockfile
 # El prebuild de @finanzas/api genera Prisma Client antes de invocar tsc.
 RUN pnpm --filter @finanzas/domain build && pnpm --filter @finanzas/api build
 

@@ -51,7 +51,7 @@ class DeterministicProvider(InsightProvider):
                 "severity": "info",
                 "message": f"El gasto diario seguro calculado es {snapshot.metrics.safeDailySpend} {snapshot.currency}.",
                 "evidenceIds": [evidence_id],
-            }],
+            }] if snapshot.metrics.safeDailySpend is not None else [],
             spendingFindings=[], opportunities=[], goals=[], news=[]
         )
 

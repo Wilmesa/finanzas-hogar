@@ -873,3 +873,134 @@ La actualización del servidor se realizará únicamente después de revisión m
   terminar.
 - La migración debe aplicarse al servidor solo después de backup, revisión y
   merge, mediante `DEPLOY_TARGET=private scripts/update-server.sh`.
+
+## 2026-09-09 — Auditoría del circuito financiero de OKLE
+
+### Alcance y decisiones
+
+- Rama local `codex/financial-flow-audit`, basada en `origin/main` (`7c08158`).
+  No se hizo push, merge ni despliegue. No se modificaron datos del hogar ni
+  migraciones existentes.
+- Diagnóstico, referencias de Firefly/Actual/Nu, flujos y plan priorizado en
+  `docs/AUDIT_2026-09-09.md`. El problema no se reduce al diseño: había errores
+  de contrato contable, concurrencia, estados de sincronización y reporting.
+- Cuenta = dinero real; bolsillo = reserva del mismo dinero; ingreso esperado =
+  planificación. No sumar estas tres cantidades como si fueran dinero distinto.
+
+### Correcciones implementadas
+
+- Los depósitos envían la fuente de ingreso requerida por Firefly. Se rechazan
+  transferencias a la misma cuenta, monedas incompatibles y reutilizaciones de
+  una clave de idempotencia para otro movimiento.
+- Las respuestas inciertas no se reenvían ciegamente: se conserva el identificador
+  confirmado o se busca la referencia exacta antes de continuar.
+- Las reservas verifican capacidad con bloqueo transaccional por cuenta; los
+  planes ejecutan solo el remanente y requieren un ingreso real sincronizado.
+- Edición de apariencia sin PUT vacío a Firefly ni reinicio de otros atributos;
+  propietario validado antes de escribir, moneda de cuenta existente protegida,
+  listado paginado de cuentas activas y titular predeterminado al crear.
+- Análisis separados por moneda, excluyendo pendientes y anulaciones. Métricas
+  de IA no calculadas se expresan como ausentes, no como ceros ficticios.
+- Accesos diarios claros en Inicio; diagnóstico de conexión real en onboarding;
+  fallos de insights no bloquean la carga financiera; texto offline sin promesas
+  de inicio de sesión sin conexión; navegación inferior ajustada a 320 px.
+- Contexto Docker excluye archivos de entorno, secretos y builds locales. Las
+  dependencias se copian antes del código para aprovechar la caché de construcción.
+
+### Verificación realizada
+
+- `CI=true pnpm verify`: aprobado (79 API + 24 dominio + 3 web + 18 operativas;
+  124 pruebas), TypeScript/Svelte, build y formato correctos.
+- `python3 -m pytest services/ai-cfo/tests -q`: 8 aprobadas.
+- QA sobre compilación de producción, no solo Vite: Más y campana a 320 px,
+  temas claro/oscuro, documento de 320 px y cinco enlaces de navegación de 60 px.
+  La campana se mantiene dentro del viewport. Esto no certifica push en móviles reales.
+- Búsqueda de patrones de credenciales en 32 archivos cambiados: sin coincidencias;
+  ningún archivo `.env` cambiado, solo `.env.example` está versionado. No reemplaza
+  una auditoría especializada de secretos. `git diff --check` correcto.
+- La verificación Docker ampliada ahora crea un libro Firefly desechable para
+  comprobar cuentas, sueldo, gastos, reservas, transferencias y ejecución de planes.
+  Los primeros ensayos fallaron en el preparador: Firefly no tenía un cliente
+  Passport personal, y su diagnóstico de consola se confundía con el token.
+  Se añadió creación explícita del cliente y de la administración del usuario,
+  captura delimitada del token y salida de error explícita. Otro intento detectó
+  que el fixture omitía la fecha del saldo inicial: se alineó con el formulario
+  real, que sí la envía. Las tres imágenes construyeron correctamente. El resultado
+  final del circuito se registra a continuación.
+- **Ensayo Docker financiero aprobado**, con las imágenes recién construidas:
+  API, web, AI-CFO, gateway, PostgreSQL, Redis y Firefly; 12 migraciones aplicadas
+  sobre bases vacías. Dos sesiones crean sus cuentas, reciben 1.000.000 COP,
+  reservan 300.000 (reintento con la misma clave incluido), gastan 100.000,
+  liberan 50.000 y transfieren 50.000. Cuenta A queda con saldo real 850.000,
+  reservado 250.000 y libre 600.000; cuenta B tiene 50.000. El otro miembro no
+  puede disponer del bolsillo del creador (404).
+- El plan añade 100.000 una sola vez incluso al repetirse con una clave nueva.
+  Dos aportes simultáneos de 400.000 sobre un disponible de 500.000 producen
+  un éxito y un rechazo; reservado final 750.000, sin sobreasignación.
+- También aprobados login, perfil, bolsillo periódico, AI-CFO determinístico,
+  página/manifest PWA, logout y revocación de sesión. La fase de arranque se
+  repitió con `SMOKE_SKIP_BUILD=true` únicamente después del build completo;
+  el comportamiento predeterminado del script/CI sigue construyendo imágenes.
+- En producción local de frontend, gráficos de demostración verificados a
+  390 px: categorías y miembros completos, ancho del documento 390 px y sin
+  errores de consola. Se restableció el viewport del navegador al terminar.
+
+### Pendientes y migración
+
+- No presentar esta auditoría como certificación de toda la aplicación: quedan
+  conciliación tras caída de procesos, reporting de más de 200 movimientos,
+  revisión exhaustiva de privacidad, libros privados guiados y pruebas PWA físicas.
+- No actualizar el servidor directamente con el árbol de trabajo. Primero cerrar
+  el ensayo financiero, revisar el diff, crear commit/PR y obtener CI verde.
+  Antes de migrar: backup de PostgreSQL/Firefly y secretos fuera de Git, ensayo de
+  restauración, actualización con el procedimiento de `MIGRATION.md` y repetición
+  del circuito con datos ficticios. No ejecutar el bootstrap de pruebas sobre el
+  libro real. El smoke elimina exclusivamente su proyecto y volúmenes efímeros.
+
+## 2026-09-11 — Cierre de estabilización para uso personal experimental
+
+Esta entrada actualiza los pendientes de la auditoría anterior; no certifica un
+SaaS comercial ni sustituye las pruebas en el teléfono y servidor del usuario.
+
+### Correcciones adicionales
+
+- Recuperación periódica y manual de sincronizaciones interrumpidas: busca la
+  referencia y valida importe, moneda y cuentas en Firefly sin reenviar dinero.
+  Las referencias ambiguas o ausentes quedan pendientes de revisión.
+- Historial paginado completo, separación compartido/privado y fechas según la
+  zona del hogar. Informes excluyen pendientes y anulaciones.
+- Selector explícito «Solo yo» para gastos, redacción para la pareja y reversión
+  del gasto privado conciliada. Los bolsillos ajenos no exponen fuentes privadas.
+- Captura offline vinculada al creador y renovación de CSRF antes de sincronizar.
+  Registros antiguos sin propietario no se envían automáticamente.
+- Backup formato 4: cuatro archivos PostgreSQL independientes, validación antes
+  de restaurar y errores explícitos. Los backups antiguos se conservan y deben
+  recuperarse en un entorno aislado antes de convertirlos.
+
+### Evidencia de cierre
+
+- `CI=true pnpm verify`: 135 pruebas (88 API, 24 dominio, 5 web, 18 operativas),
+  tipos, construcción y formato aprobados; pytest: 8 aprobadas.
+- Smoke Docker real aprobado: siete servicios, 12 migraciones, dos usuarios,
+  salario idempotente, reservas concurrentes, propiedad, gastos y transferencias.
+- Simulación de confirmación perdida recupera el ingreso existente sin duplicarlo.
+  Un gasto privado oculta descripción/categoría a la pareja y su reversión restaura
+  el saldo. Planes repetidos no duplican reservas.
+- Restauración probada de las cuatro bases con escritores detenidos: movimientos
+  conservados y servicios reiniciados correctamente. No se ha ensayado aquí una
+  recuperación integral de todos los volúmenes en otro servidor.
+- El fixture necesitó mover su archivo efímero de claves al directorio ignorado
+  `secrets/` para que Colima pudiera montarlo. Un ensayo interrumpido por edición
+  del script en ejecución se repitió con el script estable y terminó correctamente.
+- QA responsive sobre build de producción a 320/390 px: Más, campana, gráficos y
+  selector de privacidad. No equivale a una prueba física de Web Push en iOS.
+
+### Entrega y límites
+
+- Preparar commit en `codex/financial-flow-audit`; sin fusionar ni desplegar.
+- Antes del servidor: CI verde del commit publicado, backup y conservación de
+  claves privadas; seguir `docs/MIGRATION.md`. No ejecutar fixtures sobre datos reales.
+- Pendiente en el dispositivo: instalación/actualización PWA, permisos de avisos,
+  entrega push y captura offline. Open Finance sigue siendo sandbox, no conexión
+  bancaria real. RLS multiinquilino y auditoría externa de seguridad no certificados.
+- No se modifican ni eliminan migraciones. Secretos y `.env` quedan fuera de Git.

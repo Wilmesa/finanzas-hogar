@@ -171,27 +171,72 @@ export class AccountsService {
     },
     actor: Actor,
   ) {
-    await this.assertAccount(id, scope, actor);
-    const updated = await this.firefly.updateAccount(
-      id,
-      {
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.currency !== undefined ? { currency: input.currency } : {}),
-      },
-      scope,
-      actor.memberId,
-    );
+    const account = await this.assertAccount(id, scope, actor);
+    // Validate product metadata before any write to the external ledger.
+    // Defaults belong to creation, never to a partial update.
+    const parsed = Appearance.partial().safeParse(input);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    const appearance = parsed.data;
+    const ownerMemberId =
+      input.ownerMemberId !== undefined
+        ? await this.validateOwner(scope, input.ownerMemberId, actor)
+        : undefined;
+    if (ownerMemberId !== undefined) {
+      const linked = await this.prisma.pocket.findFirst({
+        where: {
+          householdId: actor.householdId,
+          ownerMemberId: { not: ownerMemberId ?? "" },
+          OR: [
+            { defaultAccountId: id, defaultLedgerScope: scope },
+            {
+              fundingLots: {
+                some: {
+                  sourceAccountId: id,
+                  sourceLedgerScope: scope,
+                  remainingAmount: { gt: 0 },
+                },
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
+      if (linked)
+        throw new BadRequestException(
+          "Esta cuenta respalda bolsillos de su titular actual. Libera y desvincula esas reservas antes de cambiar el titular",
+        );
+    }
+    const ledgerChanged =
+      (input.name !== undefined && input.name.trim() !== account.name) ||
+      (input.currency !== undefined &&
+        input.currency.toUpperCase() !== account.currency);
+    if (
+      input.currency !== undefined &&
+      input.currency.toUpperCase() !== account.currency
+    ) {
+      throw new BadRequestException(
+        "La moneda de una cuenta existente no se convierte al editarla. Crea otra cuenta con la moneda correcta",
+      );
+    }
+    const updated = ledgerChanged
+      ? await this.firefly.updateAccount(
+          id,
+          {
+            ...(input.name !== undefined ? { name: input.name } : {}),
+            ...(input.currency !== undefined
+              ? { currency: input.currency }
+              : {}),
+          },
+          scope,
+          actor.memberId,
+        )
+      : account;
     if (
       input.ownerMemberId !== undefined ||
       input.isPrimary !== undefined ||
       input.icon !== undefined ||
       input.color !== undefined
     ) {
-      const appearance = Appearance.partial().parse(input);
-      const ownerMemberId =
-        appearance.ownerMemberId !== undefined
-          ? await this.validateOwner(scope, appearance.ownerMemberId, actor)
-          : undefined;
       await this.prisma.accountProfile.upsert({
         where: {
           householdId_ledgerScope_fireflyAccountId: {
@@ -212,11 +257,14 @@ export class AccountsService {
         },
         update: {
           ...(ownerMemberId !== undefined ? { ownerMemberId } : {}),
-          ...(appearance.isPrimary !== undefined
+          ...(input.isPrimary !== undefined &&
+          appearance.isPrimary !== undefined
             ? { isPrimary: appearance.isPrimary }
             : {}),
-          ...(appearance.icon !== undefined ? { icon: appearance.icon } : {}),
-          ...(appearance.color !== undefined
+          ...(input.icon !== undefined && appearance.icon !== undefined
+            ? { icon: appearance.icon }
+            : {}),
+          ...(input.color !== undefined && appearance.color !== undefined
             ? { color: appearance.color }
             : {}),
         },
@@ -311,6 +359,37 @@ export class AccountsService {
       );
     }
     return account;
+  }
+
+  /** All writers of account-backed reserves acquire the same transaction lock. */
+  async assertReservationCapacity(
+    tx: Prisma.TransactionClient,
+    id: string,
+    scope: LedgerScope,
+    amount: Prisma.Decimal,
+    actor: Actor,
+  ) {
+    const key = `${actor.householdId}:${scope}:${scope === "private" ? actor.memberId : "shared"}:${id}`;
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))::text`;
+    const account = await this.assertAccount(id, scope, actor);
+    const reserved = await tx.pocketFundingLot.aggregate({
+      where: {
+        householdId: actor.householdId,
+        sourceLedgerScope: scope,
+        sourceAccountId: id,
+        currency: account.currency,
+        remainingAmount: { gt: 0 },
+      },
+      _sum: { remainingAmount: true },
+    });
+    const available = new Prisma.Decimal(account.currentBalance).minus(
+      reserved._sum.remainingAmount ?? 0,
+    );
+    if (amount.greaterThan(available)) {
+      throw new BadRequestException(
+        `La cuenta tiene ${available.toString()} ${account.currency} libres. Actualiza los saldos antes de reservar`,
+      );
+    }
   }
 
   async assertPrimaryExpenseAccount(

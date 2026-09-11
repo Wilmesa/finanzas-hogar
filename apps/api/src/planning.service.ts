@@ -739,6 +739,17 @@ export class PlanningService {
     const incomeAccountId = allocation.expectedIncome.destinationAccountId;
     const incomeLedgerScope =
       allocation.expectedIncome.actualTransaction?.ledgerScope ?? null;
+    if (
+      allocation.pocket &&
+      (!incomeAccountId ||
+        !incomeLedgerScope ||
+        allocation.expectedIncome.actualTransaction?.syncStatus !==
+          "synchronized")
+    ) {
+      throw new ConflictException(
+        "Vincula el ingreso recibido a un movimiento real sincronizado y a su cuenta antes de reservar dinero",
+      );
+    }
     if (incomeAccountId && incomeLedgerScope) {
       if (allocation.pocket) {
         await this.accounts.assertOwnedAccount(
@@ -768,6 +779,23 @@ export class PlanningService {
         },
       });
       if (repeated) return allocation;
+      if (allocation.pocket && incomeAccountId && incomeLedgerScope) {
+        await this.accounts.assertReservationCapacity(
+          tx,
+          incomeAccountId,
+          incomeLedgerScope,
+          requested,
+          actor,
+        );
+      }
+      const claimed = await tx.planFundingAllocation.updateMany({
+        where: { id, executedAmount: allocation.executedAmount },
+        data: { executedAmount: { increment: requested } },
+      });
+      if (claimed.count !== 1)
+        throw new ConflictException(
+          "Este destino cambió en otro dispositivo. Actualiza el plan",
+        );
       let pocketEventId: string | null = null;
       if (allocation.pocket) {
         const event = await tx.pocketEvent.create({
@@ -917,8 +945,23 @@ export class PlanningService {
       const projected =
         preview.allocations.find((item) => item.targetId === allocation.id)
           ?.amount ?? "0";
-      return sum.plus(projected);
+      return sum.plus(
+        Prisma.Decimal.max(
+          0,
+          new Prisma.Decimal(projected).minus(allocation.executedAmount),
+        ),
+      );
     }, new Prisma.Decimal(0));
+    if (
+      totalPocketAllocation.greaterThan(0) &&
+      (!incomeAccountId ||
+        !incomeLedgerScope ||
+        income.actualTransaction?.syncStatus !== "synchronized")
+    ) {
+      throw new ConflictException(
+        "Vincula el ingreso recibido a un movimiento real sincronizado y a su cuenta antes de reservar dinero",
+      );
+    }
     if (
       incomeAccountId &&
       incomeLedgerScope &&
@@ -947,6 +990,19 @@ export class PlanningService {
       }
     }
     return this.prisma.$transaction(async (tx) => {
+      if (
+        totalPocketAllocation.greaterThan(0) &&
+        incomeAccountId &&
+        incomeLedgerScope
+      ) {
+        await this.accounts.assertReservationCapacity(
+          tx,
+          incomeAccountId,
+          incomeLedgerScope,
+          totalPocketAllocation,
+          actor,
+        );
+      }
       const results: Array<{
         allocationId: string;
         amount: string;
@@ -954,11 +1010,25 @@ export class PlanningService {
         paymentPlanId: string | null;
       }> = [];
       for (const allocation of plan.allocations) {
-        const amount = new Prisma.Decimal(
-          preview.allocations.find((item) => item.targetId === allocation.id)
-            ?.amount ?? 0,
+        const amount = Prisma.Decimal.max(
+          0,
+          new Prisma.Decimal(
+            preview.allocations.find((item) => item.targetId === allocation.id)
+              ?.amount ?? 0,
+          ).minus(allocation.executedAmount),
         );
         if (amount.isZero()) continue;
+        const claimed = await tx.planFundingAllocation.updateMany({
+          where: {
+            id: allocation.id,
+            executedAmount: allocation.executedAmount,
+          },
+          data: { executedAmount: { increment: amount } },
+        });
+        if (claimed.count !== 1)
+          throw new ConflictException(
+            "El plan ya cambió en otro dispositivo. Actualiza antes de ejecutarlo",
+          );
         let pocketEventId: string | null = null;
         if (allocation.pocketId) {
           const event = await tx.pocketEvent.create({
@@ -1008,7 +1078,7 @@ export class PlanningService {
         await tx.planFundingAllocation.update({
           where: { id: allocation.id },
           data: {
-            executedAmount: amount,
+            executedAmount: allocation.executedAmount.plus(amount),
             status: "applied",
             appliedAt: new Date(),
             pocketEventId,
@@ -1072,6 +1142,13 @@ export class PlanningService {
         householdId: actor.householdId,
         amount: new Prisma.Decimal(parsed.data.actualAmount),
         currency: income.currency,
+        transactionType: "deposit",
+        syncStatus: "synchronized",
+        destinationAccountId: { not: null },
+        OR: [
+          { ledgerScope: "household" },
+          { ledgerScope: "private", payerMemberId: actor.memberId },
+        ],
       },
     });
     if (!attribution) {

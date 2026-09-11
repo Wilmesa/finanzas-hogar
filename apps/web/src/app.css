@@ -3327,3 +3327,29 @@ h3,
     );
   }
 }
+/* Daily operations stay reachable without entering the settings screen. */
+.daily-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-block: 1rem;
+}
+.daily-actions > a {
+  flex: 1 1 150px;
+  text-align: center;
+}
+.daily-money-help {
+  color: var(--muted);
+  font-size: 0.9rem;
+  max-width: 75ch;
+}
+@media (max-width: 360px) {
+  .nav-shell nav {
+    gap: 0;
+  }
+  .nav-shell nav a {
+    min-width: 0;
+    padding-inline: 1px;
+    font-size: 10px;
+  }
+}

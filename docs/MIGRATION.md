@@ -7,6 +7,39 @@ La aplicación soporta rutas de instalación configurables y dos topologías exp
 
 Para el servidor doméstico actual siga [DEPLOY_PRIVATE_TAILSCALE.md](DEPLOY_PRIVATE_TAILSCALE.md). Esta guía resume los invariantes comunes.
 
+## Estabilización de septiembre de 2026
+
+Esta entrega no necesita nuevas migraciones: conserva las doce existentes. Requiere
+reconstruir **API y web**, no solo copiar archivos estáticos. El conciliador vive en
+la API y se inicia cada minuto; no requiere otro worker ni n8n.
+
+Antes de actualizar, con el árbol de Git limpio y la versión revisada:
+
+1. Conserva el backup previo, `.env` y `secrets/private-metadata-keyring.json`
+   fuera del repositorio. No borres llaves antiguas: descifran gastos históricos.
+2. Revisa el código nuevo sin levantarlo todavía y ejecuta `scripts/backup.sh`.
+   El nuevo **formato 4** usa cuatro archivos `pg_dump` custom (`finanzas`,
+   `firefly`, `keycloak`, `n8n`) y verifica cada ejecución. Pausa los escritores.
+3. Copia el backup cifrado fuera del servidor y conserva su `SHA256SUMS`.
+4. Ejecuta `DEPLOY_TARGET=private scripts/update-server.sh` y revisa los healthchecks.
+5. Abre con ambos usuarios: Cuentas, Bolsillos, Movimientos y **Comprobar sincronización**.
+   No reingreses saldos iniciales ni sueldos que ya existían antes de actualizar.
+6. En la PWA, cierra y abre la aplicación para activar el service worker nuevo.
+   Prueba un borrador offline y su sincronización con el mismo usuario. Entradas
+   antiguas sin propietario no se envían automáticamente con otra sesión.
+
+`scripts/restore.sh` acepta ahora formato 4. **No elimina ni convierte backups
+antiguos**: los formatos 2/3 deben restaurarse primero en un clúster aislado con
+un administrador (contenían operaciones sobre roles), y generar allí un formato 4.
+El script rechaza esos formatos antes de detener o modificar el destino. No uses
+una restauración para “arreglar” un importe: restaura únicamente con autorización,
+versión compatible y sin escrituras concurrentes.
+
+Las notificaciones requieren HTTPS y permisos del móvil. En iOS se comprueba la
+PWA instalada; si no hay Background Sync, los pendientes se intentan al abrirla o
+recuperar conexión. Una sesión expirada exige entrar de nuevo; nunca se envían los
+pendientes de un miembro desde la sesión de otro.
+
 ## Migración 202607290001: propiedad de bolsillos y preferencias
 
 `202607290001_pocket_ownership_ui_preferences` es aditiva. Incorpora:

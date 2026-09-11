@@ -1,5 +1,7 @@
 <script lang="ts">
   import { currency } from "$lib/demo";
+  import { spendingAnalysis } from "$lib/spending-analysis";
+  import { financialDate } from "$lib/financial-date";
   import {
     createTransaction,
     financeData,
@@ -71,21 +73,13 @@
   const accountBalanceKnown = $derived(
     !isServerMode() || accountConnection?.status === "available",
   );
-  const currentMonthStart = new Date(
-    new Date().getFullYear(),
-    new Date().getMonth(),
-    1,
-  ).getTime();
+  const today = $derived(financialDate(new Date(), $financeData.settings.timezone));
+  const currentMonthStart = $derived(`${today.slice(0, 7)}-01`);
   const monthlySpent = $derived(
-    transactions
-      .filter(
-        (transaction) =>
-          transaction.kind === "expense" &&
+    spendingAnalysis(transactions.filter((transaction) =>
           transaction.scope === scope &&
-          transaction.currency === $financeData.settings.baseCurrency &&
-          new Date(transaction.occurredAt).getTime() >= currentMonthStart,
-      )
-      .reduce((sum, transaction) => sum + transaction.amount, 0),
+          financialDate(transaction.occurredAt, $financeData.settings.timezone) >= currentMonthStart && financialDate(transaction.occurredAt, $financeData.settings.timezone) <= today),
+      $financeData.settings.baseCurrency).total,
   );
   const dailyPocket = $derived(
     pockets.find(
@@ -105,15 +99,14 @@
               transaction.scope === scope &&
               transaction.pocketId === dailyPocket.id &&
               transaction.currency === dailyPocket.currency &&
-              new Date(transaction.occurredAt).getTime() >= currentMonthStart,
+              financialDate(transaction.occurredAt, $financeData.settings.timezone) >= currentMonthStart &&
+              financialDate(transaction.occurredAt, $financeData.settings.timezone) <= today &&
+              (!transaction.syncStatus || transaction.syncStatus === "synchronized") && !transaction.reversed && !transaction.isReversal,
           )
           .reduce((sum, transaction) => sum + transaction.amount, 0)
       : 0,
   );
-  const daysRemainingThisMonth =
-    new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() -
-    new Date().getDate() +
-    1;
+  const daysRemainingThisMonth = $derived(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate() - Number(today.slice(8, 10)) + 1);
   const nextIncome = $derived(
     [...$financeData.expectedIncomes]
       .filter(
@@ -205,7 +198,7 @@
       <h1>Buenos días, {$financeData.settings.memberName}</h1>
       <p>
         {$financeData.settings.householdName} ·
-        {accountBalanceKnown
+        {!isServerMode() ? "demostración con datos ficticios, sin conexión bancaria." : accountBalanceKnown
           ? "saldos reales actualizados desde Firefly."
           : accountConnection?.configured
             ? "Firefly no está disponible en este momento."
@@ -217,6 +210,13 @@
         $financeData.settings.memberName.slice(0, 1).toUpperCase()}</a
     >
   </header>
+
+  <nav class="daily-actions" aria-label="Operaciones del día">
+    <a class="secondary-button" href="/accounts">Mis cuentas</a>
+    <a class="secondary-button" href="/transactions?action=income">＋ Recibí dinero</a>
+    <a class="primary-button" href="/transactions?action=new">− Registré un gasto</a>
+  </nav>
+  <p class="daily-money-help">La cuenta muestra el dinero real. Los bolsillos apartan una parte de ese mismo dinero; no se suman otra vez al saldo. Los planes son ingresos futuros, no dinero disponible.</p>
 
   <div class="dashboard-controls">
     <div class="filter-tabs">

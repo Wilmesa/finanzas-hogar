@@ -41,10 +41,17 @@
 
   async function complete() {
     completing = true;
-    if (isServerMode()) {
-      await apiRequest("/v1/onboarding/complete", { method: "POST" });
+    error = "";
+    try {
+      if (isServerMode()) {
+        await apiRequest("/v1/onboarding/complete", { method: "POST" });
+      }
+      location.assign("/");
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "No se pudo terminar la configuración";
+    } finally {
+      completing = false;
     }
-    location.assign("/");
   }
 </script>
 
@@ -53,12 +60,13 @@
     <div>
       <span class="eyebrow">Primeros pasos</span>
       <h1>Prepara OKLE</h1>
-      <p>Comprueba el hogar, los libros contables y el primer plan sin exponer tokens en el navegador.</p>
+      <p>Para empezar solo necesitas tu hogar y una cuenta conectada. Después registra el dinero que ya tienes. Planes, IA y cuentas privadas son opcionales.</p>
     </div>
   </header>
   {#if error}
     <p class="form-error">{error}</p>
-  {:else if !status}
+  {/if}
+  {#if !status}
     <p>Revisando configuración…</p>
   {:else}
     <div class="onboarding-list">

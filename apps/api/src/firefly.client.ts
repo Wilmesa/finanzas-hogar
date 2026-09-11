@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
+import { Decimal } from "decimal.js";
 
 export type LedgerScope = "household" | "private";
 
@@ -15,8 +17,10 @@ interface FireflyAccountResponse {
       account_role?: string;
       currency_code?: string;
       current_balance?: string;
+      active?: boolean;
     };
   }>;
+  meta?: { pagination?: { current_page: number; total_pages: number } };
 }
 
 interface FireflyAccountItemResponse {
@@ -105,13 +109,96 @@ export class FireflyClient {
     );
   }
 
+  async findTransactionByReference(
+    reference: string,
+    date: string,
+    scope: LedgerScope,
+    memberId: string,
+    expected?: {
+      amount: string;
+      currency: string;
+      type: string;
+      sourceId?: string | null;
+      destinationId?: string | null;
+    },
+  ) {
+    // Read-only recovery after an ambiguous POST: external_id is not a unique constraint in Firefly.
+    const day = new Date(date);
+    const start = new Date(day.getTime() - 86400000).toISOString().slice(0, 10);
+    const end = new Date(day.getTime() + 86400000).toISOString().slice(0, 10);
+    let page = 1;
+    let totalPages = 1;
+    const matches: string[] = [];
+    do {
+      const result = await this.request<{
+        data: Array<{
+          id: string;
+          attributes: {
+            transactions: Array<{
+              internal_reference?: string | null;
+              amount: string;
+              currency_code: string;
+              type: string;
+              source_id?: string;
+              destination_id?: string;
+            }>;
+          };
+        }>;
+        meta?: { pagination?: { total_pages: number } };
+      }>(
+        `/transactions?start=${start}&end=${end}&page=${page}`,
+        scope,
+        memberId,
+      );
+      for (const group of result.data) {
+        const referenced = group.attributes.transactions.filter(
+          (split) => split.internal_reference === reference,
+        );
+        if (!referenced.length) continue;
+        const split = referenced[0]!;
+        if (
+          expected &&
+          (group.attributes.transactions.length !== 1 ||
+            !new Decimal(split.amount).equals(expected.amount) ||
+            split.currency_code !== expected.currency ||
+            split.type !== expected.type ||
+            (expected.sourceId &&
+              String(split.source_id) !== expected.sourceId) ||
+            (expected.destinationId &&
+              String(split.destination_id) !== expected.destinationId))
+        )
+          throw new ConflictException(
+            "La referencia contable existe pero sus importes o cuentas cambiaron; requiere revisión",
+          );
+        matches.push(group.id);
+      }
+      totalPages = result.meta?.pagination?.total_pages ?? page;
+      page += 1;
+    } while (page <= totalPages);
+    if (matches.length > 1)
+      throw new ConflictException(
+        "Hay más de un asiento con la misma referencia; requiere revisión",
+      );
+    return matches[0] ? { data: { id: matches[0] } } : null;
+  }
+
   async listAssetAccounts(scope: LedgerScope, memberId: string) {
-    const result = await this.request<FireflyAccountResponse>(
-      "/accounts?type=asset",
-      scope,
-      memberId,
-    );
-    return result.data.map((account) => this.toAccount(account, scope));
+    const accounts: FireflyAccountResponse["data"] = [];
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const result = await this.request<FireflyAccountResponse>(
+        `/accounts?type=asset&page=${page}`,
+        scope,
+        memberId,
+      );
+      accounts.push(
+        ...result.data.filter((account) => account.attributes.active !== false),
+      );
+      totalPages = result.meta?.pagination?.total_pages ?? page;
+      page += 1;
+    } while (page <= totalPages);
+    return accounts.map((account) => this.toAccount(account, scope));
   }
 
   async createAccount(

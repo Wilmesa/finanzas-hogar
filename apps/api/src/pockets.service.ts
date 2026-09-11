@@ -56,6 +56,14 @@ export class PocketsService {
     });
     return pockets.map((pocket) => ({
       ...pocket,
+      ...(pocket.ownerMemberId !== actor.memberId
+        ? {
+            fundingLots: [],
+            ...(pocket.defaultLedgerScope === "private"
+              ? { defaultAccountId: null, defaultLedgerScope: null }
+              : {}),
+          }
+        : {}),
       canManage: pocket.ownerMemberId === actor.memberId,
       unreconciledAmount: pocket.fundingLots
         .filter((lot) => !lot.sourceAccountId)
@@ -70,6 +78,14 @@ export class PocketsService {
   async find(id: string, actor: Actor) {
     const pocket = await this.prisma.pocket.findUnique({ where: { id } });
     if (!pocket || !canReadPocket(pocket, actor)) throw new NotFoundException();
+    if (pocket.ownerMemberId !== actor.memberId)
+      return {
+        ...pocket,
+        fundingLots: [],
+        ...(pocket.defaultLedgerScope === "private"
+          ? { defaultAccountId: null, defaultLedgerScope: null }
+          : {}),
+      };
     return pocket;
   }
 
@@ -363,12 +379,43 @@ export class PocketsService {
     idempotencyKey: string,
     actor: Actor,
   ) {
+    if (!idempotencyKey)
+      throw new BadRequestException("Idempotency-Key es obligatorio");
     const amount = new Decimal(raw.amount ?? 0);
-    if (!amount.isPositive())
+    if (!amount.isFinite() || !amount.isPositive())
       throw new ConflictException("El aporte debe ser mayor que cero");
     const pocket = await this.find(id, actor);
     this.assertOwner(pocket, actor);
     const mode = raw.mode ?? "account";
+    const repeated = await this.prisma.pocketEvent.findUnique({
+      where: {
+        householdId_idempotencyKey: {
+          householdId: actor.householdId,
+          idempotencyKey,
+        },
+      },
+    });
+    if (repeated) {
+      if (
+        repeated.pocketId !== id ||
+        repeated.type !== "allocated" ||
+        !repeated.amount.equals(amount.toString()) ||
+        repeated.sourceAccountId !== (raw.sourceAccountId ?? null) ||
+        repeated.sourceLedgerScope !== (raw.sourceLedgerScope ?? null)
+      ) {
+        throw new ConflictException(
+          "La clave ya pertenece a otra operación de bolsillo",
+        );
+      }
+      return { event: repeated, pocket, replayed: true };
+    }
+    if (!["account", "initial_adjustment", "correction"].includes(mode)) {
+      throw new BadRequestException("Selecciona un tipo de aporte válido");
+    }
+    if (pocket.status !== "active")
+      throw new BadRequestException(
+        "Activa el bolsillo antes de añadir dinero",
+      );
     const reason = raw.reason?.trim();
     let sourceAccountId: string | null = null;
     let sourceLedgerScope: LedgerScope | null = null;
@@ -409,6 +456,15 @@ export class PocketsService {
     const correctionReason = mode === "account" ? null : (reason ?? null);
     try {
       return await this.prisma.$transaction(async (tx) => {
+        if (sourceAccountId && sourceLedgerScope) {
+          await this.accounts.assertReservationCapacity(
+            tx,
+            sourceAccountId,
+            sourceLedgerScope,
+            new Prisma.Decimal(amount.toString()),
+            actor,
+          );
+        }
         const event = await tx.pocketEvent.create({
           data: {
             householdId: actor.householdId,
@@ -561,7 +617,7 @@ export class PocketsService {
           },
         });
         const updated = await tx.pocket.update({
-          where: { id: pocket.id },
+          where: { id: pocket.id, version: pocket.version },
           data: {
             currentAmount: { decrement: amount },
             version: { increment: 1 },
@@ -672,7 +728,7 @@ export class PocketsService {
         ]);
         await Promise.all([
           tx.pocket.update({
-            where: { id: source.id },
+            where: { id: source.id, version: source.version },
             data: {
               currentAmount: {
                 decrement: new Prisma.Decimal(amount.toString()),
@@ -816,6 +872,15 @@ export class PocketsService {
       );
     }
     return this.prisma.$transaction(async (tx) => {
+      if (amount.greaterThan(0)) {
+        await this.accounts.assertReservationCapacity(
+          tx,
+          accountId,
+          ledgerScope,
+          amount,
+          actor,
+        );
+      }
       const updated = await tx.pocket.updateMany({
         where: { id: pocket.id, version },
         data: {

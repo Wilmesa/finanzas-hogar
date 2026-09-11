@@ -1,6 +1,8 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { currency } from "$lib/demo";
+  import { spendingAnalysis } from "$lib/spending-analysis";
+  import { financialDate } from "$lib/financial-date";
   import {
     createTransaction,
     financeData,
@@ -9,13 +11,30 @@
   } from "$lib/finance-store";
   import type { TransactionView } from "$lib/types";
   import { onMount } from "svelte";
+  import { apiRequest } from "$lib/api";
+  import { isServerMode } from "$lib/auth";
+  import { hydrateFinanceData } from "$lib/finance-store";
+  let reconciling = $state(false);
+  let reconciliationMessage = $state("");
+  const pendingCount = $derived($financeData.transactions.filter((item) => item.syncStatus && item.syncStatus !== "synchronized").length);
+  async function reconcile() {
+    reconciling = true;
+    try {
+      const result = await apiRequest<{ recovered: number; requiresReview: number }>("/v1/transactions/reconcile", { method: "POST" });
+      reconciliationMessage = `${result.recovered} movimientos recuperados; ${result.requiresReview} requieren revisión. Los envíos recientes se comprueban después de dos minutos. No se crearon movimientos nuevos.`;
+      await hydrateFinanceData();
+    } catch (cause) { reconciliationMessage = cause instanceof Error ? cause.message : "No se pudo conciliar"; }
+    finally { reconciling = false; }
+  }
   let search = $state("");
   let pocketFilter = $state("all");
   let payerFilter = $state("all");
   let categoryFilter = $state("all");
   let dateFrom = $state("");
   let dateTo = $state("");
+  let analysisCurrency = $state("COP");
   let registering = $state(false);
+  let saving = $state(false);
   let movementKind = $state<"expense" | "income" | "transfer">("expense");
   let amount = $state<number | undefined>();
   let accountId = $state("");
@@ -28,6 +47,8 @@
   let editMerchant = $state("");
   let editCategory = $state("");
   let spendingNature = $state<"household" | "personal">("household");
+  let privacy = $state<"household" | "private">("household");
+  let viewScope = $state<"household" | "private">("household");
   let editSpendingNature = $state<"household" | "personal">("household");
   const correctionsMode = $derived(
     page.url.searchParams.get("mode") === "corrections",
@@ -55,8 +76,9 @@
     $financeData.transactions.filter((transaction) => {
       const term = search.trim().toLowerCase();
       const matchesSearch = !term || transaction.merchant.toLowerCase().includes(term) || transaction.category.toLowerCase().includes(term);
-      const date = transaction.occurredAt.slice(0, 10);
+      const date = financialDate(transaction.occurredAt, $financeData.settings.timezone);
       return matchesSearch &&
+        transaction.scope === viewScope &&
         (!correctionsMode || transaction.canCorrect !== false) &&
         (pocketFilter === "all" || transaction.pocketId === pocketFilter) &&
         (payerFilter === "all" || transaction.payer === payerFilter) &&
@@ -73,23 +95,9 @@
     }
     return new Set([...counts.entries()].filter(([, count]) => count >= 2).map(([key]) => key));
   });
-  const spendByCategory = $derived.by(() => {
-    const totals = new Map<string, number>();
-    for (const transaction of transactions) {
-      if (transaction.kind !== "expense") continue;
-      const label = transaction.category;
-      totals.set(label, (totals.get(label) ?? 0) + transaction.amount);
-    }
-    return [...totals.entries()].sort((left, right) => right[1] - left[1]);
-  });
-  const spendByPayer = $derived.by(() => {
-    const totals = new Map<string, number>();
-    for (const transaction of transactions) {
-      if (transaction.kind !== "expense") continue;
-      totals.set(transaction.payer, (totals.get(transaction.payer) ?? 0) + transaction.amount);
-    }
-    return [...totals.entries()].sort((left, right) => right[1] - left[1]);
-  });
+  const analysis = $derived(spendingAnalysis(transactions, analysisCurrency));
+  const spendByCategory = $derived(analysis.categories);
+  const spendByPayer = $derived(analysis.payers);
   const totalPeriodSpend = $derived(
     spendByCategory.reduce((sum, [, total]) => sum + total, 0),
   );
@@ -114,21 +122,18 @@
         ),
     );
     dateFrom = correctionsMode
-      ? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-          .toISOString()
-          .slice(0, 10)
-      : (latestPayroll?.occurredAt.slice(0, 10) ??
-        new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-          .toISOString()
-          .slice(0, 10));
+      ? financialDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), $financeData.settings.timezone)
+      : (latestPayroll ? financialDate(latestPayroll.occurredAt, $financeData.settings.timezone) : `${financialDate(new Date(), $financeData.settings.timezone).slice(0, 7)}-01`);
   });
 
   async function save() {
+    if (saving) return;
     error = "";
     if (!amount || amount <= 0 || !merchant.trim()) {
       error = "Completa cantidad y descripción.";
       return;
     }
+    saving = true;
     try {
       const selectedAccountId = selectableAccounts.some((account) => account.id === accountId)
         ? accountId
@@ -141,7 +146,8 @@
           movementKind === "transfer" ? destinationAccountId : undefined,
         merchant: merchant.trim(),
         category,
-        payerMemberId: payerMemberId || $financeData.settings.memberId,
+        payerMemberId: privacy === "private" ? $financeData.settings.memberId : (payerMemberId || $financeData.settings.memberId),
+        privacy: movementKind === "expense" ? privacy : "household",
         kind: movementKind,
         spendingNature:
           movementKind === "expense" ? spendingNature : "household",
@@ -151,6 +157,8 @@
       merchant = "";
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "No fue posible guardar";
+    } finally {
+      saving = false;
     }
   }
 
@@ -194,19 +202,22 @@
   }
 </script>
 <div class="page">
-  <header class="page-header"><div><span class="eyebrow">{correctionsMode ? "Ventana de siete días" : "Todo conciliado"}</span><h1>{correctionsMode ? "Correcciones" : "Movimientos"}</h1><p>{correctionsMode ? "Revisa y corrige descripción, categoría o naturaleza sin alterar el asiento bancario original." : "Ingresos, gastos y transferencias con cuenta de origen y destino."}</p></div>{#if !correctionsMode}<button class="primary-button" onclick={() => (registering = !registering)}>＋ Registrar</button>{/if}</header>
+  {#if isServerMode()}<section class="panel"><p>{pendingCount ? `${pendingCount} movimientos sin confirmar. No los registres otra vez.` : "Sin movimientos pendientes en el historial cargado."}</p><button class="secondary-button" disabled={reconciling} onclick={reconcile}>{reconciling ? "Comprobando…" : "Comprobar sincronización"}</button>{#if reconciliationMessage}<p role="status">{reconciliationMessage}</p>{/if}</section>{/if}
+  <header class="page-header"><div><span class="eyebrow">{correctionsMode ? "Ventana de siete días" : pendingCount ? "Sincronización pendiente" : "Historial financiero"}</span><h1>{correctionsMode ? "Correcciones" : "Movimientos"}</h1><p>{correctionsMode ? "Revisa y corrige descripción, categoría o naturaleza sin alterar el asiento bancario original." : "Ingresos, gastos y transferencias con cuenta de origen y destino."}</p></div>{#if !correctionsMode}<button class="primary-button" onclick={() => (registering = !registering)}>＋ Registrar</button>{/if}</header>
   {#if registering}
     <section class="panel inline-entry">
+      {#if movementKind === "expense"}<label>Visibilidad del detalle<select bind:value={privacy}><option value="household">Compartido</option><option value="private">Solo yo</option></select></label><p class="privacy-note">“Solo yo” oculta descripción y categoría a tu pareja. El hogar verá el importe como “Asignación personal” porque sale de una cuenta común. “Personal” es una clasificación, no una opción de privacidad.</p>{/if}
       <div class="form-grid"><label>Tipo<select bind:value={movementKind}><option value="expense">Gasto</option><option value="income">Ingreso recibido</option><option value="transfer">Transferencia entre cuentas</option></select></label><label>Cantidad<input type="number" min="1" bind:value={amount} /></label><label>{movementKind === "income" ? "Cuenta que recibe" : "Cuenta de origen"}<select bind:value={accountId}><option value="">Seleccionar…</option>{#each selectableAccounts as account}<option value={account.id}>{account.icon} {account.name} · {account.ownerName} · {currency(account.availableBalance, account.currency)} disponible</option>{/each}</select>{#if !selectableAccounts.length}<small>{movementKind === "expense" ? "Marca al menos una cuenta compartida como principal en " : "Crea una cuenta desde "}<a href="/accounts">Cuentas</a>.</small>{/if}</label>{#if movementKind === "transfer"}<label>Cuenta que recibe<select bind:value={destinationAccountId}><option value="">Seleccionar…</option>{#each destinationAccounts as account}<option value={account.id}>{account.icon} {account.name} · {account.ownerName}</option>{/each}</select><small>Debe pertenecer al mismo libro y usar la misma moneda.</small></label>{/if}<label>Descripción<input bind:value={merchant} placeholder={movementKind === "transfer" ? "Ej. transferencia a mi pareja" : ""} /></label><label>Categoría<select bind:value={category}>{#each $financeData.categories as item}<option value={item.name}>{item.icon} {item.name}</option>{/each}</select></label><label>Responsable<select bind:value={payerMemberId}>{#each $financeData.members as member}<option value={member.id}>{member.displayName}</option>{/each}</select></label>{#if movementKind === "expense"}<label>Este gasto es<select bind:value={spendingNature}><option value="household">Familiar</option><option value="personal">Personal</option></select></label>{/if}</div>
-      {#if error}<p class="form-error">{error}</p>{/if}<button class="primary-button" onclick={save}>Guardar {movementKind === "expense" ? "gasto" : movementKind === "income" ? "ingreso" : "transferencia"}</button>
+      {#if error}<p class="form-error">{error}</p>{/if}<button class="primary-button" disabled={saving} onclick={save}>{saving ? "Guardando…" : "Guardar"} {movementKind === "expense" ? "gasto" : movementKind === "income" ? "ingreso" : "transferencia"}</button>
     </section>
   {/if}
   <section class="source-analysis panel">
-    <div class="analysis-heading"><div><span class="eyebrow">Análisis del periodo</span><h2>Quién gastó y en qué</h2><p>Las gráficas respetan los filtros y fechas seleccionados.</p></div><strong>{currency(totalPeriodSpend)}</strong></div>
+    <label>Ver movimientos<select bind:value={viewScope}><option value="household">Compartidos</option><option value="private">Solo yo</option></select></label>
+    <div class="analysis-heading"><div><span class="eyebrow">Análisis del periodo</span><h2>Quién gastó y en qué</h2><p>Solo gastos confirmados, sin reversiones. Cada moneda se analiza por separado.</p><label>Moneda del análisis<select bind:value={analysisCurrency}><option>COP</option><option>USD</option><option>EUR</option></select></label></div><strong>{currency(totalPeriodSpend, analysisCurrency)}</strong></div>
     {#if totalPeriodSpend > 0}
       <div class="analysis-pairs">
-        <div class="source-bars"><strong>Por categoría</strong>{#each spendByCategory.slice(0,5) as [label, total]}<div class="analysis-bar"><span><b>{label}</b><small>{currency(total)}</small></span><div aria-label={`${label}: ${Math.round((total / totalPeriodSpend) * 100)} % del gasto`}><i style={`width:${Math.max(4, (total / largestCategorySpend) * 100)}%`}></i></div></div>{/each}</div>
-        <div class="source-bars"><strong>Por persona</strong>{#each spendByPayer.slice(0,5) as [label, total]}<div class="analysis-bar member-bar"><span><b>{label}</b><small>{currency(total)}</small></span><div aria-label={`${label}: ${Math.round((total / totalPeriodSpend) * 100)} % del gasto`}><i style={`width:${Math.max(4, (total / largestPayerSpend) * 100)}%`}></i></div></div>{/each}</div>
+        <div class="source-bars"><strong>Por categoría</strong>{#each spendByCategory.slice(0,5) as [label, total]}<div class="analysis-bar"><span><b>{label}</b><small>{currency(total, analysisCurrency)}</small></span><div aria-label={`${label}: ${Math.round((total / totalPeriodSpend) * 100)} % del gasto`}><i style={`width:${Math.max(4, (total / largestCategorySpend) * 100)}%`}></i></div></div>{/each}</div>
+        <div class="source-bars"><strong>Por persona</strong>{#each spendByPayer.slice(0,5) as [label, total]}<div class="analysis-bar member-bar"><span><b>{label}</b><small>{currency(total, analysisCurrency)}</small></span><div aria-label={`${label}: ${Math.round((total / totalPeriodSpend) * 100)} % del gasto`}><i style={`width:${Math.max(4, (total / largestPayerSpend) * 100)}%`}></i></div></div>{/each}</div>
       </div>
     {:else}<p class="empty-inline">No hay gastos para representar con los filtros actuales.</p>{/if}
   </section>
